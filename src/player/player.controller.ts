@@ -1,0 +1,54 @@
+import { Controller, Get, Patch, Body, Query, UseGuards } from '@nestjs/common';
+import { PlayerService } from './player.service';
+import { UpdatePlayerDto } from './dto/update-player.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+
+@Controller('player')
+@UseGuards(JwtAuthGuard)
+export class PlayerController {
+  constructor(private readonly playerService: PlayerService) {}
+
+  @Get('me')
+  async getProfile(@CurrentUser('id') playerId: string) {
+    return this.playerService.getProfile(playerId);
+  }
+
+  @Patch('me')
+  async updateProfile(
+    @CurrentUser('id') playerId: string,
+    @Body() updatePlayerDto: UpdatePlayerDto,
+  ) {
+    return this.playerService.updateProfile(playerId, updatePlayerDto);
+  }
+
+  @Get('me/stats')
+  async getStats(@CurrentUser('id') playerId: string) {
+    return this.playerService.getStats(playerId);
+  }
+
+  @Get('me/matches')
+  async getMatchHistory(
+    @CurrentUser('id') playerId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('mode') mode?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.playerService.getMatchHistory(
+      playerId,
+      limit ? parseInt(limit, 10) : 20,
+      offset ? parseInt(offset, 10) : 0,
+      mode,
+      status,
+    );
+  }
+
+  @Patch('me/push-token')
+  async updatePushToken(
+    @CurrentUser('id') playerId: string,
+    @Body('expoPushToken') expoPushToken: string,
+  ) {
+    return this.playerService.updatePushToken(playerId, expoPushToken);
+  }
+}

@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  id              String    @id @default(uuid())
+  username        String    @unique
+  email           String    @unique
+  password        String
+  avatar          String?
+  expoPushToken   String?
+  language        String    @default("en")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  refreshTokens RefreshToken[]
+  matchesAsP1   Match[]          @relation("Player1Matches")
+  matchesAsP2   Match[]          @relation("Player2Matches")
+  moves         Move[]
+  roomsHosted   Room[]           @relation("HostedRooms")
+  roomsJoined   Room[]           @relation("JoinedRooms")
+  stats         Stats?
+
+  @@map("players")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  playerId  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Stats {
+  id              String  @id @default(uuid())
+  playerId        String  @unique
+  totalGames      Int     @default(0)
+  wins            Int     @default(0)
+  losses          Int     @default(0)
+  draws           Int     @default(0)
+  bestScore       Int     @default(0)
+  currentStreak   Int     @default(0)
+  bestStreak      Int     @default(0)
+  avgTimePerGame  Int     @default(0)
+  totalPicos      Int     @default(0)
+  totalPalas      Int     @default(0)
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@map("stats")
+}
+
+model Match {
+  id            String      @id @default(uuid())
+  mode          GameMode
+  status        MatchStatus @default(WAITING)
+  player1Id     String
+  player2Id     String?
+  player1Number String
+  player2Number String?
+  currentTurn   Int         @default(1)
+  turnCount     Int         @default(0)
+  maxTurns      Int         @default(10)
+  winnerId      String?
+  roomId        String?     @unique
+  aiDifficulty  Difficulty?
+  startedAt     DateTime    @default(now())
+  finishedAt    DateTime?
+  createdAt     DateTime    @default(now())
+
+  // Relations
+  player1 Player @relation("Player1Matches", fields: [player1Id], references: [id])
+  player2 Player? @relation("Player2Matches", fields: [player2Id], references: [id])
+  room    Room?
+  moves   Move[]
+
+  @@index([player1Id])
+  @@index([player2Id])
+  @@index([status])
+  @@index([roomId])
+  @@map("matches")
+}
+
+model Move {
+  id         String   @id @default(uuid())
+  matchId    String
+  playerId   String?
+  turnNumber Int
+  guess      String
+  palas      Int
+  picos      Int
+  isWin      Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  match  Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player Player? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+
+  @@index([matchId])
+  @@index([playerId])
+  @@map("moves")
+}
+
+model Room {
+  id        String     @id @default(uuid())
+  code      String     @unique
+  type      RoomType
+  hostId    String
+  guestId   String?
+  matchId   String?    @unique
+  maxTurns  Int        @default(10)
+  status    RoomStatus @default(WAITING)
+  createdAt DateTime   @default(now())
+  expiresAt DateTime
+
+  // Relations
+  host    Player @relation("HostedRooms", fields: [hostId], references: [id])
+  guest   Player? @relation("JoinedRooms", fields: [guestId], references: [id])
+  match   Match?  @relation(fields: [matchId], references: [id])
+
+  @@index([type])
+  @@index([status])
+  @@index([guestId])
+  @@index([expiresAt])
+  @@map("rooms")
+}
+
+enum GameMode {
+  VERSUS_AI
+  PRIVATE
+  GLOBAL
+}
+
+enum MatchStatus {
+  WAITING
+  PLAYING
+  FINISHED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum RoomType {
+  PRIVATE
+  GLOBAL
+}
+
+enum RoomStatus {
+  WAITING
+  READY
+  IN_GAME
+  CLOSED
+}
