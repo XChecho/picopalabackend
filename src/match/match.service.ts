@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException,
 import { PrismaService } from '../prisma/prisma.service';
 import { GameService } from '../game/game.service';
 import { AiService } from '../game/ai/ai.service';
+import { EloService } from '../elo/elo.service';
 import { CreateMatchDto } from './dto/create-match.dto';
 
 const AI_PLAYER_ID = 'ai-player';
@@ -12,13 +13,16 @@ export class MatchService {
     private prismaService: PrismaService,
     private gameService: GameService,
     private aiService: AiService,
+    private eloService: EloService,
   ) {}
 
   async createMatch(playerId: string, createMatchDto: CreateMatchDto) {
+    if (createMatchDto.mode !== 'VERSUS_AI') {
+      throw new BadRequestException('POST /match is only for VERSUS_AI mode. Use Room module for PRIVATE/GLOBAL.');
+    }
+
     const player1Number = this.gameService.generateSecretNumber();
-    const player2Number = createMatchDto.mode === 'VERSUS_AI' 
-      ? this.gameService.generateSecretNumber() 
-      : null;
+    const player2Number = this.gameService.generateSecretNumber();
 
     const match = await this.prismaService.match.create({
       data: {
@@ -73,6 +77,72 @@ export class MatchService {
       player1Number: match.player1Id === playerId ? player1Number : undefined,
       player2Number: match.player2Id === playerId ? player2Number : undefined,
     };
+  }
+
+  async forfeitMatch(playerId: string, matchId: string) {
+    const match = await this.prismaService.match.findUnique({
+      where: { id: matchId },
+    });
+
+    if (!match) {
+      throw new NotFoundException('Match not found');
+    }
+
+    if (match.status === 'FINISHED') {
+      return match;
+    }
+
+    if (match.player1Id !== playerId && match.player2Id !== playerId) {
+      throw new ForbiddenException('Not a participant in this match');
+    }
+
+    const opponentId =
+      match.player1Id === playerId ? match.player2Id : match.player1Id;
+
+    const updatedMatch = await this.prismaService.match.update({
+      where: { id: matchId },
+      data: {
+        status: 'FINISHED',
+        winnerId: opponentId ?? null,
+        finishedAt: new Date(),
+      },
+    });
+
+    await this.prismaService.stats.update({
+      where: { playerId },
+      data: {
+        losses: { increment: 1 },
+        totalGames: { increment: 1 },
+      },
+    });
+
+    if (opponentId) {
+      await this.prismaService.stats.update({
+        where: { playerId: opponentId },
+        data: {
+          wins: { increment: 1 },
+          totalGames: { increment: 1 },
+        },
+      });
+
+      if (match.mode === 'GLOBAL') {
+        await this.eloService.updatePlayerElo(opponentId, playerId, matchId);
+      }
+    }
+
+    return updatedMatch;
+  }
+
+  async getActiveMatchByPlayer(playerId: string) {
+    const match = await this.prismaService.match.findFirst({
+      where: {
+        status: 'PLAYING',
+        OR: [{ player1Id: playerId }, { player2Id: playerId }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return match;
   }
 
   async submitMove(playerId: string, matchId: string, guess: string) {
@@ -192,19 +262,26 @@ export class MatchService {
       },
     });
 
+    if (match.mode === 'GLOBAL' && matchStatus === 'FINISHED' && winnerId) {
+      const loserId = isPlayer1 ? match.player2Id : match.player1Id;
+      if (loserId) {
+        await this.eloService.updatePlayerElo(winnerId, loserId, matchId);
+      }
+    }
+
     let aiMove = null;
 
-    if (match.mode === 'VERSUS_AI' && (matchStatus as string) !== 'FINISHED' && aiMove === null) {
+    if (match.mode === 'VERSUS_AI' && (matchStatus as string) !== 'FINISHED') {
       const opponentId = isPlayer1 ? match.player2Id : match.player1Id;
       if (!opponentId) {
-        const aiGuess = this.generateAiMove(match.aiDifficulty!, match.moves);
+        const aiGuess = this.generateAiMove(match.aiDifficulty!, [...match.moves, move]);
         const aiSecret = match.player1Number;
         const aiFeedback = this.gameService.calculateFeedback(aiGuess, aiSecret);
 
         aiMove = await this.prismaService.move.create({
           data: {
             matchId,
-            playerId: 'ai',
+            playerId: AI_PLAYER_ID,
             turnNumber: match.currentTurn + 1,
             guess: aiGuess,
             palas: aiFeedback.palas,
@@ -214,6 +291,7 @@ export class MatchService {
         });
 
         if (aiFeedback.isWin) {
+          matchStatus = 'FINISHED';
           await this.prismaService.match.update({
             where: { id: matchId },
             data: {

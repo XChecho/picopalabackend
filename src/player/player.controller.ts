@@ -1,4 +1,15 @@
-import { Controller, Get, Patch, Body, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Body,
+  Query,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { PlayerService } from './player.service';
 import { UpdatePlayerDto } from './dto/update-player.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -44,11 +55,31 @@ export class PlayerController {
     );
   }
 
+  @Post('me/avatar')
+  @UseInterceptors(FileInterceptor('avatar'))
+  async uploadAvatar(
+    @CurrentUser('id') playerId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.playerService.updateAvatar(playerId, file);
+  }
+
   @Patch('me/push-token')
   async updatePushToken(
     @CurrentUser('id') playerId: string,
     @Body('expoPushToken') expoPushToken: string,
   ) {
     return this.playerService.updatePushToken(playerId, expoPushToken);
+  }
+
+  @Get('me/elo-history')
+  async getEloHistory(
+    @CurrentUser('id') playerId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.playerService.getEloHistory(
+      playerId,
+      limit ? parseInt(limit, 10) : 20,
+    );
   }
 }

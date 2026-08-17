@@ -1,10 +1,14 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { UpdatePlayerDto } from './dto/update-player.dto';
 
 @Injectable()
 export class PlayerService {
-  constructor(private prismaService: PrismaService) {}
+  constructor(
+    private prismaService: PrismaService,
+    private cloudinaryService: CloudinaryService,
+  ) {}
 
   async getProfile(playerId: string) {
     const player = await this.prismaService.player.findUnique({
@@ -125,6 +129,35 @@ export class PlayerService {
     };
   }
 
+  async updateAvatar(playerId: string, file: Express.Multer.File) {
+    const player = await this.prismaService.player.findUnique({
+      where: { id: playerId },
+    });
+
+    if (!player) {
+      throw new NotFoundException('Player not found');
+    }
+
+    if (player.avatar) {
+      await this.cloudinaryService.deleteImage(player.avatar);
+    }
+
+    const avatarUrl = await this.cloudinaryService.uploadImage(file);
+
+    return this.prismaService.player.update({
+      where: { id: playerId },
+      data: { avatar: avatarUrl },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatar: true,
+        language: true,
+        createdAt: true,
+      },
+    });
+  }
+
   async updatePushToken(playerId: string, expoPushToken: string) {
     await this.prismaService.player.update({
       where: { id: playerId },
@@ -132,5 +165,23 @@ export class PlayerService {
     });
 
     return { message: 'Push token updated' };
+  }
+
+  async getEloHistory(playerId: string, limit: number = 20) {
+    return this.prismaService.eloHistory.findMany({
+      where: { playerId },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 50),
+      include: {
+        match: {
+          select: {
+            id: true,
+            mode: true,
+            winnerId: true,
+            finishedAt: true,
+          },
+        },
+      },
+    });
   }
 }

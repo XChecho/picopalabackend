@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { PlayerModule } from './player/player.module';
 import { MatchModule } from './match/match.module';
@@ -7,6 +9,7 @@ import { RoomModule } from './room/room.module';
 import { GameModule } from './game/game.module';
 import { NotificationModule } from './notification/notification.module';
 import { StatsModule } from './stats/stats.module';
+import { EloModule } from './elo/elo.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -15,6 +18,18 @@ import { RedisModule } from './redis/redis.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: configService.get<number>('THROTTLE_TTL') || 60000,
+            limit: configService.get<number>('THROTTLE_LIMIT') || 100,
+          },
+        ],
+      }),
+    }),
     AuthModule,
     PlayerModule,
     MatchModule,
@@ -22,8 +37,15 @@ import { RedisModule } from './redis/redis.module';
     GameModule,
     NotificationModule,
     StatsModule,
+    EloModule,
     PrismaModule,
     RedisModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

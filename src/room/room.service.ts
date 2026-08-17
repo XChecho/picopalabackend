@@ -68,7 +68,7 @@ export class RoomService {
 
     const match = await this.prismaService.match.create({
       data: {
-        mode: 'PRIVATE',
+        mode: room.type === 'GLOBAL' ? 'GLOBAL' : 'PRIVATE',
         status: 'PLAYING',
         player1Id: room.hostId,
         player2Id: guestId,
@@ -111,6 +111,16 @@ export class RoomService {
   }
 
   async joinGlobalQueue(playerId: string, maxTurns: number = 10) {
+    const player = await this.prismaService.player.findUnique({
+      where: { id: playerId },
+      select: { elo: true },
+    });
+
+    if (!player) {
+      throw new NotFoundException('Player not found');
+    }
+
+    const initialEloRange = 200;
     const existingRoom = await this.prismaService.room.findFirst({
       where: {
         type: 'GLOBAL',
@@ -118,7 +128,17 @@ export class RoomService {
         guestId: null,
         hostId: { not: playerId },
         expiresAt: { gt: new Date() },
+        host: {
+          elo: {
+            gte: player.elo - initialEloRange,
+            lte: player.elo + initialEloRange,
+          },
+        },
       },
+      include: {
+        host: { select: { elo: true } },
+      },
+      orderBy: { createdAt: 'asc' },
     });
 
     if (existingRoom) {
