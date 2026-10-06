@@ -10,6 +10,7 @@ import { GameModule } from './game/game.module';
 import { NotificationModule } from './notification/notification.module';
 import { StatsModule } from './stats/stats.module';
 import { EloModule } from './elo/elo.module';
+import { PublicModule } from './public/public.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { validateEnv } from './common/config/env.validation';
@@ -40,6 +41,7 @@ import { validateEnv } from './common/config/env.validation';
     NotificationModule,
     StatsModule,
     EloModule,
+    PublicModule,
     PrismaModule,
     RedisModule,
   ],

@@ -21,6 +21,9 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     if (short.length > 0) {
       throw new Error(`${short.join(', ')} must be at least 32 characters in production`);
     }
+    if (!config.CONTACT_IP_SALT) {
+      throw new Error('CONTACT_IP_SALT is required in production');
+    }
     if (!config.CORS_ORIGIN) {
       throw new Error('CORS_ORIGIN is required in production');
     }
