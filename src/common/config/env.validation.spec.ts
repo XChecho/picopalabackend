@@ -16,6 +16,8 @@ const prod = (overrides: Record<string, unknown> = {}) => ({
   JWT_REFRESH_SECRET: LONG_B,
   CONTACT_IP_SALT: "salt",
   CORS_ORIGIN: "https://picopala.com",
+  TURNSTILE_SECRET_KEY: "turnstile-secret",
+  BFF_SHARED_SECRET: "bff-secret",
   ...overrides,
 });
 
@@ -90,6 +92,18 @@ describe("validateEnv", () => {
     it("requires CORS_ORIGIN", () => {
       expect(() => validateEnv(prod({ CORS_ORIGIN: "" }))).toThrow(
         "CORS_ORIGIN is required in production",
+      );
+    });
+
+    it("requires TURNSTILE_SECRET_KEY", () => {
+      expect(() =>
+        validateEnv(prod({ TURNSTILE_SECRET_KEY: undefined })),
+      ).toThrow("TURNSTILE_SECRET_KEY is required in production");
+    });
+
+    it("requires BFF_SHARED_SECRET", () => {
+      expect(() => validateEnv(prod({ BFF_SHARED_SECRET: "" }))).toThrow(
+        "BFF_SHARED_SECRET is required in production",
       );
     });
 

@@ -27,6 +27,12 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     if (!config.CORS_ORIGIN) {
       throw new Error('CORS_ORIGIN is required in production');
     }
+    if (!config.TURNSTILE_SECRET_KEY) {
+      throw new Error('TURNSTILE_SECRET_KEY is required in production');
+    }
+    if (!config.BFF_SHARED_SECRET) {
+      throw new Error('BFF_SHARED_SECRET is required in production');
+    }
   }
 
   return config;
