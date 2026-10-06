@@ -33,9 +33,6 @@ lerna-debug.log*
 coverage/
 .nyc_output/
 
-# Prisma
-prisma/migrations/
-
 # Redis
 *.rdb
 dump.rdb
