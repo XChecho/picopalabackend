@@ -6,7 +6,7 @@ import { Language, Platform, Player, Prisma, Rank } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthService } from "./auth.service";
-import { RegisterDto } from "./dto/register.dto";
+import { RegisterBaseDto } from "./dto/register-base.dto";
 
 jest.mock("bcrypt", () => ({
   hash: jest.fn(),
@@ -95,7 +95,7 @@ describe("AuthService", () => {
     );
   });
 
-  const registerDto: RegisterDto = {
+  const registerDto: RegisterBaseDto = {
     username: "Alice",
     email: "alice@example.com",
     password: "password123",
@@ -106,7 +106,7 @@ describe("AuthService", () => {
       prisma.player.findFirst.mockResolvedValue(null);
       prisma.player.create.mockResolvedValue(makePlayer());
 
-      const result = await service.register(registerDto, "jest-agent");
+      const result = await service.register(registerDto, Platform.WEB, "jest-agent");
 
       expect(bcryptHash).toHaveBeenCalledWith("password123", 12);
       expect(prisma.player.create).toHaveBeenCalledWith({
@@ -123,11 +123,11 @@ describe("AuthService", () => {
       expect(result.player).not.toHaveProperty("passwordHash");
     });
 
-    it("maps the requested language and defaults the platform to WEB", async () => {
+    it("maps the requested language and stores the platform given by the controller", async () => {
       prisma.player.findFirst.mockResolvedValue(null);
       prisma.player.create.mockResolvedValue(makePlayer());
 
-      await service.register({ ...registerDto, language: "pt" });
+      await service.register({ ...registerDto, language: "pt" }, Platform.WEB);
 
       expect(prisma.player.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ language: Language.PT }),
@@ -140,7 +140,7 @@ describe("AuthService", () => {
     it("throws a generic 409 when username or email already exist", async () => {
       prisma.player.findFirst.mockResolvedValue({ id: "x" });
 
-      const error = await service.register(registerDto).catch((e) => e);
+      const error = await service.register(registerDto, Platform.WEB).catch((e) => e);
 
       expect(error).toBeInstanceOf(ConflictException);
       expect((error as ConflictException).message).toBe(
@@ -158,7 +158,7 @@ describe("AuthService", () => {
         }),
       );
 
-      await expect(service.register(registerDto)).rejects.toThrow(
+      await expect(service.register(registerDto, Platform.WEB)).rejects.toThrow(
         "Username or email already in use",
       );
     });
@@ -168,12 +168,12 @@ describe("AuthService", () => {
       const boom = new Error("db down");
       prisma.player.create.mockRejectedValue(boom);
 
-      await expect(service.register(registerDto)).rejects.toBe(boom);
+      await expect(service.register(registerDto, Platform.WEB)).rejects.toBe(boom);
     });
 
     it("queries the username case-insensitively", async () => {
       prisma.player.findFirst.mockResolvedValue({ id: "x" });
-      await service.register(registerDto).catch(() => undefined);
+      await service.register(registerDto, Platform.WEB).catch(() => undefined);
 
       expect(prisma.player.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -194,7 +194,7 @@ describe("AuthService", () => {
     it("returns tokens and public player data for valid credentials", async () => {
       prisma.player.findFirst.mockResolvedValue(makePlayer());
 
-      const result = await service.login(loginDto, "agent");
+      const result = await service.login(loginDto, Platform.WEB, "agent");
 
       expect(bcryptCompare).toHaveBeenCalledWith("password123", "stored-hash");
       expect(result.accessToken).toBe("token-1");
@@ -210,7 +210,7 @@ describe("AuthService", () => {
       prisma.player.findFirst.mockResolvedValue(makePlayer());
       bcryptCompare.mockResolvedValue(false);
 
-      await expect(service.login(loginDto)).rejects.toThrow(
+      await expect(service.login(loginDto, Platform.WEB)).rejects.toThrow(
         UnauthorizedException,
       );
       expect(prisma.session.create).not.toHaveBeenCalled();
@@ -221,7 +221,7 @@ describe("AuthService", () => {
       bcryptHash.mockResolvedValue("dummy-hash");
       bcryptCompare.mockResolvedValue(true);
 
-      await expect(service.login(loginDto)).rejects.toThrow(
+      await expect(service.login(loginDto, Platform.WEB)).rejects.toThrow(
         "Invalid credentials",
       );
       expect(bcryptCompare).toHaveBeenCalledWith("password123", "dummy-hash");
@@ -234,7 +234,7 @@ describe("AuthService", () => {
       bcryptHash.mockResolvedValue("dummy-hash");
       bcryptCompare.mockResolvedValue(true);
 
-      await expect(service.login(loginDto)).rejects.toThrow(
+      await expect(service.login(loginDto, Platform.WEB)).rejects.toThrow(
         UnauthorizedException,
       );
       expect(bcryptCompare).toHaveBeenCalledTimes(1);
@@ -243,7 +243,7 @@ describe("AuthService", () => {
     it("filters out soft-deleted players in the lookup", async () => {
       prisma.player.findFirst.mockResolvedValue(null);
 
-      await service.login(loginDto).catch(() => undefined);
+      await service.login(loginDto, Platform.WEB).catch(() => undefined);
 
       expect(prisma.player.findFirst).toHaveBeenCalledWith({
         where: {
@@ -257,8 +257,8 @@ describe("AuthService", () => {
       prisma.player.findFirst.mockResolvedValue(null);
       bcryptHash.mockResolvedValue("dummy-hash");
 
-      await service.login(loginDto).catch(() => undefined);
-      await service.login(loginDto).catch(() => undefined);
+      await service.login(loginDto, Platform.WEB).catch(() => undefined);
+      await service.login(loginDto, Platform.WEB).catch(() => undefined);
 
       expect(bcryptHash).toHaveBeenCalledTimes(1);
       expect(bcryptCompare).toHaveBeenCalledTimes(2);
@@ -441,7 +441,7 @@ describe("AuthService", () => {
       prisma.player.findFirst.mockResolvedValue(makePlayer());
       prisma.session.findMany.mockResolvedValue([{ id: "s11" }, { id: "s12" }]);
 
-      await service.login({ username: "alice", password: "password123" });
+      await service.login({ username: "alice", password: "password123" }, Platform.WEB);
 
       expect(prisma.session.findMany).toHaveBeenCalledWith({
         where: {
@@ -461,7 +461,7 @@ describe("AuthService", () => {
     it("does not delete anything when under the limit", async () => {
       prisma.player.findFirst.mockResolvedValue(makePlayer());
 
-      await service.login({ username: "alice", password: "password123" });
+      await service.login({ username: "alice", password: "password123" }, Platform.WEB);
 
       expect(prisma.session.deleteMany).not.toHaveBeenCalled();
     });

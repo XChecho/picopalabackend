@@ -1,11 +1,13 @@
 import { ValidationPipe } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { Test } from "@nestjs/testing";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import helmet from "helmet";
 import { AppModule } from "../../src/app.module";
+import { CaptchaService } from "../../src/captcha/captcha.service";
 import { HttpExceptionFilter } from "../../src/common/filters/http-exception.filter";
 import { TransformInterceptor } from "../../src/common/interceptors/transform.interceptor";
 import { parseCorsOrigins } from "../../src/common/utils/cors.util";
+import { FakeCaptchaService } from "./fake-captcha";
 
 /**
  * Builds the app exactly like src/main.ts (minus the console banner); it listens on an
@@ -13,7 +15,12 @@ import { parseCorsOrigins } from "../../src/common/utils/cors.util";
  * (ConfigModule snapshots it), so env tweaks must happen before importing this module.
  */
 export async function createApp(): Promise<NestExpressApplication> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+  // CaptchaService is replaced by a fake: accepts "ok-token", rejects anything else.
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(CaptchaService)
+    .useClass(FakeCaptchaService)
+    .compile();
+  const app = moduleRef.createNestApplication<NestExpressApplication>({
     logger: false,
   });
 

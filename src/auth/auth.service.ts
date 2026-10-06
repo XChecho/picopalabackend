@@ -10,8 +10,8 @@ import { Language, Platform, Player, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { PrismaService } from '../prisma/prisma.service';
-import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
+import { LoginBaseDto } from './dto/login-base.dto';
+import { RegisterBaseDto } from './dto/register-base.dto';
 
 const BCRYPT_COST = 12;
 const MAX_ACTIVE_SESSIONS = 10;
@@ -38,7 +38,11 @@ export class AuthService {
     private configService: ConfigService,
   ) {}
 
-  async register(registerDto: RegisterDto, userAgent?: string) {
+  async register(
+    registerDto: RegisterBaseDto,
+    platform: Platform,
+    userAgent?: string,
+  ) {
     const existingPlayer = await this.prismaService.player.findFirst({
       where: {
         OR: [
@@ -75,16 +79,16 @@ export class AuthService {
       throw error;
     }
 
-    const tokens = await this.startSession(
-      player,
-      registerDto.platform ?? Platform.WEB,
-      userAgent,
-    );
+    const tokens = await this.startSession(player, platform, userAgent);
 
     return { ...tokens, player: this.toPublicPlayer(player) };
   }
 
-  async login(loginDto: LoginDto, userAgent?: string) {
+  async login(
+    loginDto: LoginBaseDto,
+    platform: Platform,
+    userAgent?: string,
+  ) {
     const player = await this.prismaService.player.findFirst({
       where: {
         username: { equals: loginDto.username, mode: 'insensitive' },
@@ -103,11 +107,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const tokens = await this.startSession(
-      player,
-      loginDto.platform ?? Platform.WEB,
-      userAgent,
-    );
+    const tokens = await this.startSession(player, platform, userAgent);
 
     await this.prismaService.player.update({
       where: { id: player.id },

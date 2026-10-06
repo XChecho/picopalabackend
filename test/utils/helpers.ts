@@ -6,6 +6,7 @@ import { TEST_DATABASE_URL } from "./env";
 
 export const API = "/api/v1";
 export const PASSWORD = "Sup3rSecret!";
+export const BFF_KEY = "e2e-bff-shared-secret-0123456789";
 
 let ipCounter = 0;
 
@@ -58,9 +59,9 @@ export async function registerUser(
   const password = overrides.password ?? PASSWORD;
 
   const res = await http(app)
-    .post(`${API}/auth/register`)
+    .post(`${API}/web/auth/register`)
     .set("X-Forwarded-For", freshIp())
-    .send({ username, email, password });
+    .send({ username, email, password, captchaToken: "ok-token" });
 
   if (res.status !== 201) {
     throw new Error(
@@ -83,7 +84,7 @@ export async function loginUser(
   password = PASSWORD,
 ) {
   return http(app)
-    .post(`${API}/auth/login`)
+    .post(`${API}/web/auth/login`)
     .set("X-Forwarded-For", freshIp())
     .send({ username, password });
 }

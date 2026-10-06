@@ -1,6 +1,8 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
+import { CaptchaService } from '../captcha/captcha.service';
+import { getClientIp } from '../common/utils/client-ip.util';
 import { ContactDto } from './dto/contact.dto';
 import { LeaderboardQueryDto } from './dto/leaderboard-query.dto';
 import { UsernameParamDto } from './dto/username-param.dto';
@@ -15,12 +17,19 @@ import {
 
 @Controller('public')
 export class PublicController {
-  constructor(private readonly publicService: PublicService) {}
+  constructor(
+    private readonly publicService: PublicService,
+    private readonly captchaService: CaptchaService,
+  ) {}
 
   @Post('waitlist')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async joinWaitlist(@Body() dto: WaitlistDto): Promise<{ subscribed: true }> {
+  async joinWaitlist(
+    @Body() dto: WaitlistDto,
+    @Req() req: Request,
+  ): Promise<{ subscribed: true }> {
+    await this.captchaService.verify(dto.captchaToken, getClientIp(req));
     return this.publicService.joinWaitlist(dto);
   }
 
@@ -28,7 +37,9 @@ export class PublicController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async contact(@Body() dto: ContactDto, @Req() req: Request): Promise<{ received: true }> {
-    return this.publicService.createContactMessage(dto, req.ip ?? '');
+    const ip = getClientIp(req);
+    await this.captchaService.verify(dto.captchaToken, ip);
+    return this.publicService.createContactMessage(dto, ip);
   }
 
   @Get('stats')

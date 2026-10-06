@@ -59,7 +59,7 @@ export class PublicService {
     private readonly config: ConfigService,
   ) {}
 
-  async joinWaitlist(dto: WaitlistDto): Promise<{ subscribed: true }> {
+  async joinWaitlist(dto: Omit<WaitlistDto, 'captchaToken'>): Promise<{ subscribed: true }> {
     // Existing rows (including unsubscribed ones) are left untouched; the
     // response is identical either way to avoid email enumeration.
     await this.prisma.waitlistSubscriber.upsert({
@@ -75,7 +75,10 @@ export class PublicService {
     return { subscribed: true };
   }
 
-  async createContactMessage(dto: ContactDto, ip: string): Promise<{ received: true }> {
+  async createContactMessage(
+    dto: Omit<ContactDto, 'captchaToken'>,
+    ip: string,
+  ): Promise<{ received: true }> {
     const salt = this.config.get<string>('CONTACT_IP_SALT') || DEFAULT_IP_SALT;
     const ipHash = createHash('sha256').update(`${ip}${salt}`).digest('hex');
     await this.prisma.contactMessage.create({

@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { createApp } from "./utils/app";
 import {
   API,
+  BFF_KEY,
   containsText,
   createDb,
   freshIp,
@@ -36,6 +37,14 @@ const mkStats = (
   db.playerStats.create({
     data: { playerId, mode: "VERSUS_AI", games, wins, losses: games - wins },
   });
+
+const payload = {
+  name: "  Ada   Lovelace ",
+  email: " Ada@Example.COM ",
+  subject: "Hello    there",
+  message: "Line one\r\n\r\n\r\n\r\nLine   two  ",
+  captchaToken: "ok-token",
+};
 
 describe("Public endpoints (e2e)", () => {
   let app: INestApplication;
@@ -260,7 +269,7 @@ describe("Public endpoints (e2e)", () => {
         http(app)
           .post(`${API}/public/waitlist`)
           .set("X-Forwarded-For", ip)
-          .send({ email, ...extra });
+          .send({ email, captchaToken: "ok-token", ...extra });
 
       const first = await post("  Fan@Example.COM ", {
         locale: "pt",
@@ -288,7 +297,7 @@ describe("Public endpoints (e2e)", () => {
       const res = await http(app)
         .post(`${API}/public/waitlist`)
         .set("X-Forwarded-For", "198.51.100.21")
-        .send({ email: "gone@example.com" });
+        .send({ email: "gone@example.com", captchaToken: "ok-token" });
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual({ subscribed: true });
       const row = await db.waitlistSubscriber.findUniqueOrThrow({
@@ -303,22 +312,21 @@ describe("Public endpoints (e2e)", () => {
       ["unknown locale", { email: "a@example.com", locale: "fr" }],
       ["source too long", { email: "a@example.com", source: "x".repeat(65) }],
       ["extra field", { email: "a@example.com", admin: true }],
+      ["missing captchaToken", { email: "a@example.com", captchaToken: undefined }],
+      [
+        "captchaToken too long",
+        { email: "a@example.com", captchaToken: "t".repeat(2049) },
+      ],
     ])("rejects %s with 400", async (_name, body) => {
       const res = await http(app)
         .post(`${API}/public/waitlist`)
         .set("X-Forwarded-For", freshIp())
-        .send(body);
+        .send({ captchaToken: "ok-token", ...body });
       expect(res.status).toBe(400);
     });
   });
 
   describe("POST /public/contact", () => {
-    const payload = {
-      name: "  Ada   Lovelace ",
-      email: " Ada@Example.COM ",
-      subject: "Hello    there",
-      message: "Line one\r\n\r\n\r\n\r\nLine   two  ",
-    };
 
     it("stores a cleaned message with a salted IP hash instead of the IP", async () => {
       const ip = "198.51.100.30";
@@ -350,12 +358,68 @@ describe("Public endpoints (e2e)", () => {
       ["empty message", { message: "  " }],
       ["message too long", { message: "x".repeat(5001) }],
       ["extra field", { phone: "123" }],
+      ["missing captchaToken", { captchaToken: undefined }],
     ])("rejects %s with 400", async (_name, patch) => {
       const res = await http(app)
         .post(`${API}/public/contact`)
         .set("X-Forwarded-For", freshIp())
         .send({ ...payload, ...patch });
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe("captcha and BFF client IP", () => {
+    it("waitlist: bad-token => 403 and nothing stored", async () => {
+      const res = await http(app)
+        .post(`${API}/public/waitlist`)
+        .set("X-Forwarded-For", freshIp())
+        .send({ email: "captcha-bad@example.com", captchaToken: "bad-token" });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe("Captcha verification failed");
+      expect(
+        await db.waitlistSubscriber.count({
+          where: { email: "captcha-bad@example.com" },
+        }),
+      ).toBe(0);
+    });
+
+    it("contact: bad-token => 403 and nothing stored", async () => {
+      const res = await http(app)
+        .post(`${API}/public/contact`)
+        .set("X-Forwarded-For", freshIp())
+        .send({ ...payload, email: "captcha-bad@example.com", captchaToken: "bad-token" });
+      expect(res.status).toBe(403);
+      expect(
+        await db.contactMessage.count({ where: { email: "captcha-bad@example.com" } }),
+      ).toBe(0);
+    });
+
+    it("contact: ipHash uses X-Client-IP only with a valid X-BFF-Key", async () => {
+      const hash = (ip: string) =>
+        createHash("sha256").update(`${ip}e2e-contact-salt`).digest("hex");
+
+      await http(app)
+        .post(`${API}/public/contact`)
+        .set("X-Forwarded-For", "198.51.100.40")
+        .set("X-BFF-Key", BFF_KEY)
+        .set("X-Client-IP", "203.0.113.99")
+        .send({ ...payload, subject: "via-bff" })
+        .expect(200);
+      await http(app)
+        .post(`${API}/public/contact`)
+        .set("X-Forwarded-For", "198.51.100.41")
+        .set("X-Client-IP", "203.0.113.99")
+        .send({ ...payload, subject: "no-key" })
+        .expect(200);
+
+      const viaBff = await db.contactMessage.findFirstOrThrow({
+        where: { subject: "via-bff" },
+      });
+      const noKey = await db.contactMessage.findFirstOrThrow({
+        where: { subject: "no-key" },
+      });
+      expect(viaBff.ipHash).toBe(hash("203.0.113.99"));
+      expect(noKey.ipHash).toBe(hash("198.51.100.41"));
     });
   });
 
@@ -374,7 +438,7 @@ describe("Public endpoints (e2e)", () => {
         const res = await http(limited)
           .post(`${API}/public/waitlist`)
           .set("X-Forwarded-For", "192.0.2.50")
-          .send({ email: `rl${i}@example.com` });
+          .send({ email: `rl${i}@example.com`, captchaToken: "ok-token" });
         statuses.push(res.status);
       }
       expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
@@ -382,7 +446,7 @@ describe("Public endpoints (e2e)", () => {
       const other = await http(limited)
         .post(`${API}/public/waitlist`)
         .set("X-Forwarded-For", "192.0.2.51")
-        .send({ email: "rl-other@example.com" });
+        .send({ email: "rl-other@example.com", captchaToken: "ok-token" });
       expect(other.status).toBe(200);
     });
 
@@ -397,6 +461,7 @@ describe("Public endpoints (e2e)", () => {
             email: "c@example.com",
             subject: "s",
             message: `m${i}`,
+            captchaToken: "ok-token",
           });
         statuses.push(res.status);
       }

@@ -15,6 +15,8 @@ import {
   uniqueName,
 } from "./utils/helpers";
 
+const OK = "ok-token";
+
 describe("Auth (e2e)", () => {
   let app: INestApplication;
   let db: PrismaClient;
@@ -30,16 +32,17 @@ describe("Auth (e2e)", () => {
     await db.$disconnect();
   });
 
-  describe("POST /auth/register", () => {
+  describe("POST /web/auth/register", () => {
     it("creates the player and returns tokens without leaking the hash", async () => {
       const username = uniqueName("reg");
       const res = await http(app)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", freshIp())
         .send({
           username,
           email: `${username}@Example.com`,
           password: PASSWORD,
+          captchaToken: OK,
         });
 
       expect(res.status).toBe(201);
@@ -66,20 +69,22 @@ describe("Auth (e2e)", () => {
       await registerUser(app, { username });
 
       const byUsername = await http(app)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", freshIp())
         .send({
           username: username.toUpperCase(),
           email: "other1@example.com",
           password: PASSWORD,
+          captchaToken: OK,
         });
       const byEmail = await http(app)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", freshIp())
         .send({
           username: uniqueName("dpe"),
           email: `${username.toLowerCase()}@EXAMPLE.com`,
           password: PASSWORD,
+          captchaToken: OK,
         });
 
       expect(byUsername.status).toBe(409);
@@ -101,12 +106,13 @@ describe("Auth (e2e)", () => {
     ])("rejects %s with 400", async (_name, patch) => {
       const username = uniqueName("val");
       const res = await http(app)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", freshIp())
         .send({
           username,
           email: `${username}@example.com`,
           password: PASSWORD,
+          captchaToken: OK,
           ...patch,
         });
 
@@ -117,14 +123,14 @@ describe("Auth (e2e)", () => {
 
     it("rejects an empty body with 400", async () => {
       const res = await http(app)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", freshIp())
         .send({});
       expect(res.status).toBe(400);
     });
   });
 
-  describe("POST /auth/login", () => {
+  describe("POST /web/auth/login", () => {
     it("logs in by username case-insensitively", async () => {
       const user = await registerUser(app);
       for (const variant of [
@@ -156,7 +162,7 @@ describe("Auth (e2e)", () => {
 
     it("rejects malformed payloads with 400", async () => {
       const res = await http(app)
-        .post(`${API}/auth/login`)
+        .post(`${API}/web/auth/login`)
         .set("X-Forwarded-For", freshIp())
         .send({ username: "ab", password: "short" });
       expect(res.status).toBe(400);
@@ -173,10 +179,10 @@ describe("Auth (e2e)", () => {
     });
   });
 
-  describe("POST /auth/refresh", () => {
+  describe("POST /web/auth/refresh", () => {
     const refresh = (accessOrRefresh: string, body: string) =>
       http(app)
-        .post(`${API}/auth/refresh`)
+        .post(`${API}/web/auth/refresh`)
         .set("X-Forwarded-For", freshIp())
         .set(bearer(accessOrRefresh))
         .send({ refreshToken: body });
@@ -233,7 +239,7 @@ describe("Auth (e2e)", () => {
 
     it("rejects missing/garbage tokens", async () => {
       const noAuth = await http(app)
-        .post(`${API}/auth/refresh`)
+        .post(`${API}/web/auth/refresh`)
         .set("X-Forwarded-For", freshIp())
         .send({ refreshToken: "abc" });
       expect(noAuth.status).toBe(401);
@@ -256,19 +262,19 @@ describe("Auth (e2e)", () => {
     });
   });
 
-  describe("POST /auth/logout", () => {
+  describe("POST /web/auth/logout", () => {
     it("revokes the session family so the refresh token stops working", async () => {
       const user = await registerUser(app);
 
       const out = await http(app)
-        .post(`${API}/auth/logout`)
+        .post(`${API}/web/auth/logout`)
         .set(bearer(user.accessToken))
         .send({ refreshToken: user.refreshToken });
       expect(out.status).toBe(200);
       expect(out.body.data.message).toBe("Logged out successfully");
 
       const res = await http(app)
-        .post(`${API}/auth/refresh`)
+        .post(`${API}/web/auth/refresh`)
         .set("X-Forwarded-For", freshIp())
         .set(bearer(user.refreshToken))
         .send({ refreshToken: user.refreshToken });
@@ -277,13 +283,13 @@ describe("Auth (e2e)", () => {
 
     it("requires authentication and a body", async () => {
       const noAuth = await http(app)
-        .post(`${API}/auth/logout`)
+        .post(`${API}/web/auth/logout`)
         .send({ refreshToken: "x" });
       expect(noAuth.status).toBe(401);
 
       const user = await registerUser(app);
       const noBody = await http(app)
-        .post(`${API}/auth/logout`)
+        .post(`${API}/web/auth/logout`)
         .set(bearer(user.accessToken))
         .send({});
       expect(noBody.status).toBe(400);
@@ -293,13 +299,13 @@ describe("Auth (e2e)", () => {
       const a = await registerUser(app);
       const b = await registerUser(app);
       const out = await http(app)
-        .post(`${API}/auth/logout`)
+        .post(`${API}/web/auth/logout`)
         .set(bearer(a.accessToken))
         .send({ refreshToken: b.refreshToken });
       expect(out.status).toBe(200);
 
       const stillValid = await http(app)
-        .post(`${API}/auth/refresh`)
+        .post(`${API}/web/auth/refresh`)
         .set("X-Forwarded-For", freshIp())
         .set(bearer(b.refreshToken))
         .send({ refreshToken: b.refreshToken });
@@ -355,12 +361,13 @@ describe("Auth (e2e)", () => {
       for (let i = 0; i < 6; i++) {
         const username = uniqueName("thr");
         const res = await http(limited)
-          .post(`${API}/auth/register`)
+          .post(`${API}/web/auth/register`)
           .set("X-Forwarded-For", ip)
           .send({
             username,
             email: `${username}@example.com`,
             password: PASSWORD,
+            captchaToken: OK,
           });
         statuses.push(res.status);
       }
@@ -368,12 +375,13 @@ describe("Auth (e2e)", () => {
 
       // A different client IP is unaffected.
       const other = await http(limited)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", "203.0.113.11")
         .send({
           username: uniqueName("thr"),
           email: `${uniqueName("thr")}@example.com`,
           password: PASSWORD,
+          captchaToken: OK,
         });
       expect(other.status).toBe(201);
     });
@@ -383,7 +391,7 @@ describe("Auth (e2e)", () => {
       const statuses: number[] = [];
       for (let i = 0; i < 11; i++) {
         const res = await http(limited)
-          .post(`${API}/auth/login`)
+          .post(`${API}/web/auth/login`)
           .set("X-Forwarded-For", ip)
           .send({ username: "ghostuser", password: PASSWORD });
         statuses.push(res.status);

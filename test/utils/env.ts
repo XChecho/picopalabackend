@@ -19,6 +19,7 @@ const forced: Record<string, string> = {
   THROTTLE_LIMIT: "100000",
   CORS_ORIGIN: "http://localhost:8081",
   CONTACT_IP_SALT: "e2e-contact-salt",
+  BFF_SHARED_SECRET: "e2e-bff-shared-secret-0123456789",
   REDIS_HOST: "127.0.0.1",
   REDIS_PORT: String(TEST_REDIS_PORT),
   REDIS_PASSWORD: "",
@@ -33,6 +34,8 @@ const forced: Record<string, string> = {
 };
 
 Object.assign(process.env, forced);
+// Never verify against Cloudflare in tests (the fake CaptchaService is also injected).
+delete process.env.TURNSTILE_SECRET_KEY;
 
 if (!/@localhost:54340\//.test(process.env.DATABASE_URL ?? "")) {
   throw new Error("E2E tests must only run against localhost:54340");

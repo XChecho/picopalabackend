@@ -38,4 +38,9 @@ export class ContactDto {
   @IsNotEmpty()
   @MaxLength(5000)
   message!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2048)
+  captchaToken!: string;
 }

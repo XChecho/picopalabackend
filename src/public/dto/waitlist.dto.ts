@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export const WAITLIST_LOCALES = ['es', 'en', 'pt'] as const;
 export type WaitlistLocale = (typeof WAITLIST_LOCALES)[number];
@@ -20,4 +20,9 @@ export class WaitlistDto {
   @IsString()
   @MaxLength(64)
   source?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2048)
+  captchaToken!: string;
 }

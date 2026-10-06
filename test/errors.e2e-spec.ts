@@ -74,7 +74,7 @@ describe("Error handling (e2e)", () => {
 
     it("returns 400 for malformed JSON", async () => {
       const res = await http(app)
-        .post(`${API}/auth/login`)
+        .post(`${API}/web/auth/login`)
         .set("X-Forwarded-For", freshIp())
         .set("Content-Type", "application/json")
         .send('{"username": "abc",');
@@ -87,7 +87,7 @@ describe("Error handling (e2e)", () => {
       "returns 413 for bodies above the 100kb JSON limit",
       async () => {
         const res = await http(app)
-          .post(`${API}/auth/login`)
+          .post(`${API}/web/auth/login`)
           .set("X-Forwarded-For", freshIp())
           .send({ username: "abc", password: "x".repeat(150_000) });
         expect(res.status).toBe(413);
@@ -97,7 +97,7 @@ describe("Error handling (e2e)", () => {
 
     it("returns 400 (not 500) for malformed JSON", async () => {
       const res = await http(app)
-        .post(`${API}/auth/login`)
+        .post(`${API}/web/auth/login`)
         .set("X-Forwarded-For", freshIp())
         .set("Content-Type", "application/json")
         .send('{"username": abc');
@@ -107,7 +107,7 @@ describe("Error handling (e2e)", () => {
 
     it("returns a structured 400 with validation messages", async () => {
       const res = await http(app)
-        .post(`${API}/auth/register`)
+        .post(`${API}/web/auth/register`)
         .set("X-Forwarded-For", freshIp())
         .send({ username: "!", email: "x", password: "1" });
       expect(res.status).toBe(400);
@@ -176,7 +176,7 @@ describe("Error handling (e2e)", () => {
         .mockRejectedValueOnce(new Error("connect ECONNREFUSED 10.0.0.5:5432"));
 
       const res = await http(app)
-        .post(`${API}/auth/login`)
+        .post(`${API}/web/auth/login`)
         .set("X-Forwarded-For", freshIp())
         .send({ username: user.username, password: PASSWORD });
       expect(res.status).toBe(500);
@@ -214,7 +214,7 @@ describe("Error handling (e2e)", () => {
 
     it("answers CORS preflight only for the configured origin", async () => {
       const allowed = await http(app)
-        .options(`${API}/auth/login`)
+        .options(`${API}/web/auth/login`)
         .set("Origin", "http://localhost:8081")
         .set("Access-Control-Request-Method", "POST");
       expect(allowed.headers["access-control-allow-origin"]).toBe(
@@ -223,7 +223,7 @@ describe("Error handling (e2e)", () => {
       expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
 
       const denied = await http(app)
-        .options(`${API}/auth/login`)
+        .options(`${API}/web/auth/login`)
         .set("Origin", "https://evil.example.com")
         .set("Access-Control-Request-Method", "POST");
       expect(denied.headers["access-control-allow-origin"]).toBeUndefined();

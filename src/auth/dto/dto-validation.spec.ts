@@ -9,8 +9,10 @@ import { UsernameParamDto } from "../../public/dto/username-param.dto";
 import { SubmitMoveDto } from "../../match/dto/submit-move.dto";
 import { JoinRoomDto } from "../../room/dto/join-room.dto";
 import { SyncStatsDto } from "../../stats/dto/sync-stats.dto";
-import { LoginDto } from "./login.dto";
-import { RegisterDto } from "./register.dto";
+import { MobileLoginDto } from "./mobile-login.dto";
+import { MobileRegisterDto } from "./mobile-register.dto";
+import { WebLoginDto } from "./web-login.dto";
+import { WebRegisterDto } from "./web-register.dto";
 
 type Ctor<T> = new () => T;
 
@@ -30,15 +32,16 @@ const validRegister = {
   username: "Alice99",
   email: "alice@example.com",
   password: "password123",
+  captchaToken: "tok",
 };
 
-describe("RegisterDto", () => {
+describe("WebRegisterDto", () => {
   it("accepts a valid payload", async () => {
-    expect((await check(RegisterDto, validRegister)).failed).toEqual([]);
+    expect((await check(WebRegisterDto, validRegister)).failed).toEqual([]);
   });
 
   it("trims and lowercases the email", async () => {
-    const { instance, failed } = await check(RegisterDto, {
+    const { instance, failed } = await check(WebRegisterDto, {
       ...validRegister,
       email: "  Alice@Example.COM ",
     });
@@ -54,14 +57,14 @@ describe("RegisterDto", () => {
     ["with accents", "álice"],
   ])("rejects a username %s", async (_label, username) => {
     expect(
-      (await check(RegisterDto, { ...validRegister, username })).failed,
+      (await check(WebRegisterDto, { ...validRegister, username })).failed,
     ).toEqual(["username"]);
   });
 
   it.each([3, 20])("accepts a username of %i characters", async (len) => {
     expect(
       (
-        await check(RegisterDto, {
+        await check(WebRegisterDto, {
           ...validRegister,
           username: "a".repeat(len),
         })
@@ -74,14 +77,14 @@ describe("RegisterDto", () => {
     ["73 chars", "a".repeat(73)],
   ])("rejects a password with %s", async (_label, password) => {
     expect(
-      (await check(RegisterDto, { ...validRegister, password })).failed,
+      (await check(WebRegisterDto, { ...validRegister, password })).failed,
     ).toEqual(["password"]);
   });
 
   it.each([8, 72])("accepts a password of %i characters", async (len) => {
     expect(
       (
-        await check(RegisterDto, {
+        await check(WebRegisterDto, {
           ...validRegister,
           password: "a".repeat(len),
         })
@@ -89,48 +92,149 @@ describe("RegisterDto", () => {
     ).toEqual([]);
   });
 
-  it("rejects invalid emails, language and platform", async () => {
+  it("rejects invalid emails and language", async () => {
     expect(
       (
-        await check(RegisterDto, {
+        await check(WebRegisterDto, {
           ...validRegister,
           email: "nope",
           language: "fr",
-          platform: "PLAYSTATION",
         })
       ).failed,
-    ).toEqual(["email", "language", "platform"]);
+    ).toEqual(["email", "language"]);
+  });
+
+  it.each(["WEB", "IOS"])("rejects a client-declared platform %s", async (platform) => {
+    expect(
+      (await check(WebRegisterDto, { ...validRegister, platform })).failed,
+    ).toEqual(["platform"]);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["empty", ""],
+    ["too long", "t".repeat(2049)],
+    ["not a string", 42],
+  ])("rejects a %s captchaToken", async (_label, captchaToken) => {
+    expect(
+      (await check(WebRegisterDto, { ...validRegister, captchaToken })).failed,
+    ).toEqual(["captchaToken"]);
+  });
+
+  it("accepts a captchaToken of 2048 characters", async () => {
+    expect(
+      (
+        await check(WebRegisterDto, {
+          ...validRegister,
+          captchaToken: "t".repeat(2048),
+        })
+      ).failed,
+    ).toEqual([]);
   });
 
   it("rejects non-whitelisted properties such as elo or role", async () => {
     expect(
-      (await check(RegisterDto, { ...validRegister, elo: 3000 })).failed,
+      (await check(WebRegisterDto, { ...validRegister, elo: 3000 })).failed,
     ).toEqual(["elo"]);
   });
 
   it("does not crash on a non-string email", async () => {
     expect(
-      (await check(RegisterDto, { ...validRegister, email: 123 })).failed,
+      (await check(WebRegisterDto, { ...validRegister, email: 123 })).failed,
     ).toEqual(["email"]);
   });
 });
 
-describe("LoginDto", () => {
+describe("WebLoginDto", () => {
   it("accepts valid credentials", async () => {
     expect(
-      (await check(LoginDto, { username: "alice", password: "password123" }))
+      (await check(WebLoginDto, { username: "alice", password: "password123" }))
         .failed,
     ).toEqual([]);
   });
 
   it("rejects short usernames and out-of-range passwords", async () => {
     expect(
-      (await check(LoginDto, { username: "al", password: "short" })).failed,
+      (await check(WebLoginDto, { username: "al", password: "short" })).failed,
     ).toEqual(["password", "username"]);
     expect(
-      (await check(LoginDto, { username: "alice", password: "a".repeat(73) }))
+      (await check(WebLoginDto, { username: "alice", password: "a".repeat(73) }))
         .failed,
     ).toEqual(["password"]);
+  });
+});
+
+describe("WebLoginDto platform", () => {
+  it("rejects a platform field", async () => {
+    expect(
+      (
+        await check(WebLoginDto, {
+          username: "alice",
+          password: "password123",
+          platform: "WEB",
+        })
+      ).failed,
+    ).toEqual(["platform"]);
+  });
+});
+
+describe("Mobile auth DTOs", () => {
+  const { captchaToken: _omit, ...mobileRegister } = validRegister;
+  void _omit;
+
+  it.each(["IOS", "ANDROID"])("accepts platform %s", async (platform) => {
+    expect(
+      (await check(MobileRegisterDto, { ...mobileRegister, platform })).failed,
+    ).toEqual([]);
+    expect(
+      (
+        await check(MobileLoginDto, {
+          username: "alice",
+          password: "password123",
+          platform,
+        })
+      ).failed,
+    ).toEqual([]);
+  });
+
+  it.each(["WEB", "ios", "WINDOWS", undefined])(
+    "rejects platform %p",
+    async (platform) => {
+      expect(
+        (await check(MobileRegisterDto, { ...mobileRegister, platform })).failed,
+      ).toEqual(["platform"]);
+      expect(
+        (
+          await check(MobileLoginDto, {
+            username: "alice",
+            password: "password123",
+            platform,
+          })
+        ).failed,
+      ).toEqual(["platform"]);
+    },
+  );
+
+  it("does not accept a captchaToken and keeps the shared rules", async () => {
+    expect(
+      (
+        await check(MobileRegisterDto, {
+          ...mobileRegister,
+          platform: "IOS",
+          captchaToken: "x",
+          username: "a_b",
+        })
+      ).failed,
+    ).toEqual(["captchaToken", "username"]);
+    expect(
+      (
+        await check(MobileRegisterDto, {
+          ...mobileRegister,
+          platform: "ANDROID",
+          email: " Bob@Example.COM ",
+        })
+      ).instance.email,
+    ).toBe("bob@example.com");
   });
 });
 
@@ -204,11 +308,11 @@ describe("JoinRoomDto", () => {
 
 describe("Public DTOs", () => {
   it("WaitlistDto normalises the email and validates the locale", async () => {
-    const ok = await check(WaitlistDto, { email: " A@B.com ", locale: "es" });
+    const ok = await check(WaitlistDto, { email: " A@B.com ", locale: "es", captchaToken: "t" });
     expect(ok.failed).toEqual([]);
     expect(ok.instance.email).toBe("a@b.com");
     expect(
-      (await check(WaitlistDto, { email: "a@b.com", locale: "fr" })).failed,
+      (await check(WaitlistDto, { email: "a@b.com", locale: "fr", captchaToken: "t" })).failed,
     ).toEqual(["locale"]);
   });
 
@@ -218,6 +322,7 @@ describe("Public DTOs", () => {
       email: " ANN@X.com",
       subject: "Hello    there",
       message: "line1\r\n\r\n\r\n\r\nline2   with   spaces ",
+      captchaToken: "t",
     });
     expect(failed).toEqual([]);
     expect(instance.name).toBe("Ann Lee");
@@ -226,12 +331,30 @@ describe("Public DTOs", () => {
     expect(instance.message).toBe("line1\n\nline2 with spaces");
   });
 
+  it("Waitlist and Contact DTOs require a captchaToken", async () => {
+    expect((await check(WaitlistDto, { email: "a@b.com" })).failed).toEqual([
+      "captchaToken",
+    ]);
+    expect(
+      (
+        await check(ContactDto, {
+          name: "n",
+          email: "a@b.com",
+          subject: "s",
+          message: "m",
+          captchaToken: "t".repeat(2049),
+        })
+      ).failed,
+    ).toEqual(["captchaToken"]);
+  });
+
   it("ContactDto rejects empty and oversized fields", async () => {
     const { failed } = await check(ContactDto, {
       name: "   ",
       email: "a@b.com",
       subject: "x".repeat(151),
       message: "m".repeat(5001),
+      captchaToken: "t",
     });
     expect(failed).toEqual(["message", "name", "subject"]);
   });
