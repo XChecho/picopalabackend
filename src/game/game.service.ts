@@ -26,12 +26,23 @@ export class GameService {
     // Pala: correct digit in a different position.
     let picos = 0;
     let palas = 0;
+    // Secret digits not already matched as picos; each can award at most one pala.
+    const unmatched = new Map<string, number>();
 
     for (let i = 0; i < 4; i++) {
       if (guess[i] === secret[i]) {
         picos++;
-      } else if (secret.includes(guess[i])) {
+      } else {
+        unmatched.set(secret[i], (unmatched.get(secret[i]) ?? 0) + 1);
+      }
+    }
+
+    for (let i = 0; i < 4; i++) {
+      if (guess[i] === secret[i]) continue;
+      const available = unmatched.get(guess[i]) ?? 0;
+      if (available > 0) {
         palas++;
+        unmatched.set(guess[i], available - 1);
       }
     }
 

@@ -37,14 +37,15 @@ export class AiService {
     let minMaxRemaining = Infinity;
 
     for (const guess of filtered.slice(0, 50)) {
+      // One pass: bucket every possible secret by the feedback this guess would get.
+      const buckets = new Map<number, number>();
       let maxRemaining = 0;
       for (const secret of filtered) {
         const feedback = this.gameService.calculateFeedback(guess, secret);
-        const remaining = filtered.filter((s) => {
-          const f = this.gameService.calculateFeedback(guess, s);
-          return f.palas === feedback.palas && f.picos === feedback.picos;
-        }).length;
-        maxRemaining = Math.max(maxRemaining, remaining);
+        const key = feedback.picos * 10 + feedback.palas;
+        const size = (buckets.get(key) ?? 0) + 1;
+        buckets.set(key, size);
+        if (size > maxRemaining) maxRemaining = size;
       }
       if (maxRemaining < minMaxRemaining) {
         minMaxRemaining = maxRemaining;
