@@ -1,0 +1,44 @@
+name: picopala
+
+services:
+  migrate:
+    build:
+      context: .
+      target: build
+    command: npx prisma migrate deploy
+    env_file: .env
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: runtime
+    env_file: .env
+    environment:
+      PORT: 4001
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports:
+      # Solo accesible desde el propio VPS; el reverse proxy publica el dominio.
+      - "127.0.0.1:4001:4001"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis-data:
