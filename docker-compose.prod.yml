@@ -1,0 +1,16 @@
+# Uso en el VPS:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Conecta la API a la red Docker del Nginx existente (PROXY_NETWORK, por defecto "proxy").
+services:
+  api:
+    ports: !reset []
+    networks:
+      default:
+      proxy:
+        aliases:
+          - picopala-api
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}
