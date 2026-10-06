@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn, MaxLength, MinLength, Matches } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsUrl, MaxLength, MinLength, Matches } from 'class-validator';
 
 export class UpdatePlayerDto {
   @IsOptional()
@@ -10,10 +10,12 @@ export class UpdatePlayerDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
+  @IsUrl({ protocols: ['https'], require_protocol: true, host_whitelist: ['res.cloudinary.com'] })
   avatar?: string;
 
   @IsOptional()
   @IsString()
-  @IsIn(['en', 'es'])
+  @IsIn(['en', 'es', 'pt'])
   language?: string;
 }

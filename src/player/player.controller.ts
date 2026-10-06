@@ -12,6 +12,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PlayerService } from './player.service';
 import { UpdatePlayerDto } from './dto/update-player.dto';
+import { UpdatePushTokenDto } from './dto/update-push-token.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -56,7 +57,13 @@ export class PlayerController {
   }
 
   @Post('me/avatar')
-  @UseInterceptors(FileInterceptor('avatar'))
+  @UseInterceptors(
+    FileInterceptor('avatar', {
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, cb) =>
+        cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
+    }),
+  )
   async uploadAvatar(
     @CurrentUser('id') playerId: string,
     @UploadedFile() file: Express.Multer.File,
@@ -67,9 +74,9 @@ export class PlayerController {
   @Patch('me/push-token')
   async updatePushToken(
     @CurrentUser('id') playerId: string,
-    @Body('expoPushToken') expoPushToken: string,
+    @Body() dto: UpdatePushTokenDto,
   ) {
-    return this.playerService.updatePushToken(playerId, expoPushToken);
+    return this.playerService.updatePushToken(playerId, dto.expoPushToken, dto.platform);
   }
 
   @Get('me/elo-history')

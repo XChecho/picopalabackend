@@ -1,4 +1,6 @@
-import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -11,25 +13,33 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
-  async register(@Body() registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
+  async register(@Body() registerDto: RegisterDto, @Req() req: Request) {
+    return this.authService.register(registerDto, req.headers['user-agent']);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() loginDto: LoginDto, @Req() req: Request) {
+    return this.authService.login(loginDto, req.headers['user-agent']);
   }
 
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @Post('refresh')
   @UseGuards(JwtRefreshGuard)
   @HttpCode(HttpStatus.OK)
   async refresh(
     @CurrentUser('id') playerId: string,
     @Body() refreshTokenDto: RefreshTokenDto,
+    @Req() req: Request,
   ) {
-    return this.authService.refreshTokens(playerId, refreshTokenDto.refreshToken);
+    return this.authService.refreshTokens(
+      playerId,
+      refreshTokenDto.refreshToken,
+      req.headers['user-agent'],
+    );
   }
 
   @Post('logout')
@@ -37,8 +47,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(
     @CurrentUser('id') playerId: string,
-    @Body('refreshToken') refreshToken: string,
+    @Body() refreshTokenDto: RefreshTokenDto,
   ) {
-    return this.authService.logout(playerId, refreshToken);
+    return this.authService.logout(playerId, refreshTokenDto.refreshToken);
   }
 }

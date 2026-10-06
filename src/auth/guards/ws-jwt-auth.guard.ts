@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class WsJwtAuthGuard implements CanActivate {
@@ -11,6 +12,7 @@ export class WsJwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -29,6 +31,14 @@ export class WsJwtAuthGuard implements CanActivate {
       const payload = this.jwtService.verify(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
+      // Soft-deleted players lose access even if their access token is still valid.
+      const player = await this.prisma.player.findFirst({
+        where: { id: payload.sub, deletedAt: null },
+        select: { id: true },
+      });
+      if (!player) {
+        throw new WsException('Invalid token');
+      }
       client.data.user = payload;
       return true;
     } catch (err) {

@@ -1,4 +1,15 @@
-import { IsString, IsEmail, MinLength, MaxLength, Matches, IsOptional, IsIn } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { Platform } from '@prisma/client';
+import {
+  IsString,
+  IsEmail,
+  MinLength,
+  MaxLength,
+  Matches,
+  IsOptional,
+  IsIn,
+  IsEnum,
+} from 'class-validator';
 
 export class RegisterDto {
   @IsString()
@@ -7,15 +18,22 @@ export class RegisterDto {
   @Matches(/^[a-zA-Z0-9]+$/, { message: 'Username must be alphanumeric' })
   username: string;
 
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
+  @MaxLength(254)
   email: string;
 
   @IsString()
   @MinLength(8)
+  @MaxLength(72)
   password: string;
 
   @IsOptional()
   @IsString()
-  @IsIn(['en', 'es'])
+  @IsIn(['en', 'es', 'pt'])
   language?: string;
+
+  @IsOptional()
+  @IsEnum(Platform)
+  platform?: Platform;
 }
