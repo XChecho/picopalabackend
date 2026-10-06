@@ -22,21 +22,23 @@ export class GameService {
   }
 
   calculateFeedback(guess: string, secret: string): MoveFeedback {
-    let palas = 0;
+    // Pico (fija): correct digit in the correct position.
+    // Pala: correct digit in a different position.
     let picos = 0;
+    let palas = 0;
 
     for (let i = 0; i < 4; i++) {
       if (guess[i] === secret[i]) {
-        palas++;
-      } else if (secret.includes(guess[i])) {
         picos++;
+      } else if (secret.includes(guess[i])) {
+        palas++;
       }
     }
 
     return {
       palas,
       picos,
-      isWin: palas === 4,
+      isWin: picos === 4,
     };
   }
 
