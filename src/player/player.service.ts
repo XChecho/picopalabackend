@@ -185,6 +185,7 @@ export class PlayerService {
           endReason: true,
           isRanked: true,
           maxTurns: true,
+          aiDifficulty: true,
           startedAt: true,
           finishedAt: true,
           createdAt: true,
