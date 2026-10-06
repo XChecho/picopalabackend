@@ -24,8 +24,9 @@ services:
       redis:
         condition: service_healthy
     ports:
-      # Solo accesible desde el propio VPS; el reverse proxy publica el dominio.
-      - "127.0.0.1:4001:4001"
+      # Solo loopback del VPS: el Nginx del host publica el dominio. El puerto del host
+      # es configurable porque 4001 ya lo usa otro servicio en el VPS.
+      - "127.0.0.1:${API_HOST_PORT:-4002}:4001"
     restart: unless-stopped
 
   redis:
