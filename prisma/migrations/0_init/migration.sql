@@ -1,4 +1,7 @@
 -- CreateEnum
+CREATE TYPE "AuthTokenType" AS ENUM ('EMAIL_VERIFY', 'PASSWORD_RESET');
+
+-- CreateEnum
 CREATE TYPE "Language" AS ENUM ('ES', 'EN', 'PT');
 
 -- CreateEnum
@@ -38,12 +41,26 @@ CREATE TABLE "players" (
     "language" "Language" NOT NULL DEFAULT 'ES',
     "elo" INTEGER NOT NULL DEFAULT 1000,
     "rank" "Rank" NOT NULL DEFAULT 'PLATA',
+    "emailVerifiedAt" TIMESTAMP(3),
     "lastSeenAt" TIMESTAMP(3),
     "deletedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "players_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "auth_tokens" (
+    "id" UUID NOT NULL,
+    "playerId" UUID NOT NULL,
+    "type" "AuthTokenType" NOT NULL,
+    "tokenHash" CHAR(64) NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "usedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "auth_tokens_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -164,6 +181,32 @@ CREATE TABLE "player_stats" (
     CONSTRAINT "player_stats_pkey" PRIMARY KEY ("playerId","mode")
 );
 
+-- CreateTable
+CREATE TABLE "waitlist_subscribers" (
+    "id" UUID NOT NULL,
+    "email" VARCHAR(254) NOT NULL,
+    "locale" "Language" NOT NULL DEFAULT 'ES',
+    "source" VARCHAR(64),
+    "confirmedAt" TIMESTAMP(3),
+    "unsubscribedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "waitlist_subscribers_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "contact_messages" (
+    "id" UUID NOT NULL,
+    "name" VARCHAR(100) NOT NULL,
+    "email" VARCHAR(254) NOT NULL,
+    "subject" VARCHAR(150) NOT NULL,
+    "message" VARCHAR(5000) NOT NULL,
+    "ipHash" CHAR(64),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "contact_messages_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "players_username_key" ON "players"("username");
 
@@ -172,6 +215,18 @@ CREATE UNIQUE INDEX "players_email_key" ON "players"("email");
 
 -- CreateIndex
 CREATE INDEX "players_elo_idx" ON "players"("elo");
+
+-- CreateIndex
+CREATE INDEX "players_deletedAt_idx" ON "players"("deletedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "auth_tokens_tokenHash_key" ON "auth_tokens"("tokenHash");
+
+-- CreateIndex
+CREATE INDEX "auth_tokens_playerId_type_idx" ON "auth_tokens"("playerId", "type");
+
+-- CreateIndex
+CREATE INDEX "auth_tokens_expiresAt_idx" ON "auth_tokens"("expiresAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "sessions_tokenHash_key" ON "sessions"("tokenHash");
@@ -230,6 +285,15 @@ CREATE INDEX "rooms_hostId_idx" ON "rooms"("hostId");
 -- CreateIndex
 CREATE INDEX "rooms_status_expiresAt_idx" ON "rooms"("status", "expiresAt");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "waitlist_subscribers_email_key" ON "waitlist_subscribers"("email");
+
+-- CreateIndex
+CREATE INDEX "contact_messages_createdAt_idx" ON "contact_messages"("createdAt");
+
+-- AddForeignKey
+ALTER TABLE "auth_tokens" ADD CONSTRAINT "auth_tokens_playerId_fkey" FOREIGN KEY ("playerId") REFERENCES "players"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 -- AddForeignKey
 ALTER TABLE "sessions" ADD CONSTRAINT "sessions_playerId_fkey" FOREIGN KEY ("playerId") REFERENCES "players"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -258,18 +322,5 @@ ALTER TABLE "rooms" ADD CONSTRAINT "rooms_hostId_fkey" FOREIGN KEY ("hostId") RE
 ALTER TABLE "player_stats" ADD CONSTRAINT "player_stats_playerId_fkey" FOREIGN KEY ("playerId") REFERENCES "players"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 
--- Domain rules enforced by the database (not expressible in Prisma schema)
-ALTER TABLE "match_participants"
-  ADD CONSTRAINT "match_participants_seat_check" CHECK ("seat" IN (1, 2)),
-  ADD CONSTRAINT "match_participants_secret_check" CHECK ("secretNumber" IS NULL OR "secretNumber" ~ '^[1-9]{4}$'),
-  ADD CONSTRAINT "match_participants_ai_check" CHECK (("isAi" AND "playerId" IS NULL) OR (NOT "isAi"));
-
-ALTER TABLE "moves"
-  ADD CONSTRAINT "moves_guess_check" CHECK ("guess" ~ '^[1-9]{4}$'),
-  ADD CONSTRAINT "moves_picos_check" CHECK ("picos" BETWEEN 0 AND 4),
-  ADD CONSTRAINT "moves_palas_check" CHECK ("palas" BETWEEN 0 AND 4 AND "picos" + "palas" <= 4),
-  ADD CONSTRAINT "moves_turn_check" CHECK ("turnNumber" >= 1);
-
-ALTER TABLE "matches"
-  ADD CONSTRAINT "matches_max_turns_check" CHECK ("maxTurns" BETWEEN 1 AND 30),
-  ADD CONSTRAINT "matches_seat_check" CHECK (("startingSeat" IS NULL OR "startingSeat" IN (1, 2)) AND ("currentSeat" IS NULL OR "currentSeat" IN (1, 2)));
+-- Case-insensitive uniqueness for usernames ("Sergio" and "sergio" are the same account).
+CREATE UNIQUE INDEX "players_username_lower_key" ON "players" (lower("username"));

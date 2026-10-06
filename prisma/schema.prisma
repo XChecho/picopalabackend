@@ -13,28 +13,49 @@ datasource db {
 // ─────────────────────────────────────────────
 
 model Player {
-  id           String    @id @default(uuid()) @db.Uuid
-  username     String    @unique @db.VarChar(24)
-  email        String    @unique @db.VarChar(254)
+  id              String    @id @default(uuid()) @db.Uuid
+  username        String    @unique @db.VarChar(24)
+  email           String    @unique @db.VarChar(254)
   // Optional so social login can be added later without a breaking change.
-  passwordHash String?
-  avatarUrl    String?
-  language     Language  @default(ES)
-  elo          Int       @default(1000)
-  rank         Rank      @default(PLATA)
-  lastSeenAt   DateTime?
-  deletedAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  passwordHash    String?
+  avatarUrl       String?
+  language        Language  @default(ES)
+  elo             Int       @default(1000)
+  rank            Rank      @default(PLATA)
+  emailVerifiedAt DateTime?
+  lastSeenAt      DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   sessions       Session[]
   devices        Device[]
+  authTokens     AuthToken[]
   participations MatchParticipant[]
   roomsHosted    Room[]
   stats          PlayerStats[]
 
   @@index([elo])
+  @@index([deletedAt])
   @@map("players")
+}
+
+// One-time tokens for email verification and password reset.
+model AuthToken {
+  id        String        @id @default(uuid()) @db.Uuid
+  playerId  String        @db.Uuid
+  type      AuthTokenType
+  // SHA-256 of the token sent by email; the raw token is never stored.
+  tokenHash String        @unique @db.Char(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, type])
+  @@index([expiresAt])
+  @@map("auth_tokens")
 }
 
 model Session {
@@ -140,6 +161,7 @@ model Move {
   participantId String   @db.Uuid
   turnNumber    Int      @db.SmallInt
   guess         String   @db.Char(4)
+  // Pico (fija): right digit, right position. Pala: right digit, wrong position.
   picos         Int      @db.SmallInt
   palas         Int      @db.SmallInt
   isWin         Boolean  @default(false)
@@ -202,8 +224,43 @@ model PlayerStats {
 }
 
 // ─────────────────────────────────────────────
+// Public web
+// ─────────────────────────────────────────────
+
+model WaitlistSubscriber {
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String    @unique @db.VarChar(254)
+  locale         Language  @default(ES)
+  source         String?   @db.VarChar(64)
+  confirmedAt    DateTime?
+  unsubscribedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@map("waitlist_subscribers")
+}
+
+model ContactMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(100)
+  email     String   @db.VarChar(254)
+  subject   String   @db.VarChar(150)
+  message   String   @db.VarChar(5000)
+  // SHA-256 of the sender IP, for abuse control without storing the address.
+  ipHash    String?  @db.Char(64)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("contact_messages")
+}
+
+// ─────────────────────────────────────────────
 // Enums
 // ─────────────────────────────────────────────
+
+enum AuthTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
 
 enum Language {
   ES
