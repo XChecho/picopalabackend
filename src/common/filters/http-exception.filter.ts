@@ -32,7 +32,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         errors = res.errors as Record<string, string[]> | undefined;
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
+      // Never echo internal messages (Prisma errors include table/column names).
       this.logger.error(exception.message, exception.stack);
     }
 

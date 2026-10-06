@@ -12,11 +12,13 @@ import { StatsModule } from './stats/stats.module';
 import { EloModule } from './elo/elo.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { validateEnv } from './common/config/env.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
