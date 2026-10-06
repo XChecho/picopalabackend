@@ -39,3 +39,7 @@ dump.rdb
 
 # OS
 Thumbs.db
+
+# Local/production env files (never commit; .env.example is the template)
+.env.*
+!.env.example
