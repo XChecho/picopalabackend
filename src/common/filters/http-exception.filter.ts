@@ -31,6 +31,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message = (res.message as string) || message;
         errors = res.errors as Record<string, string[]> | undefined;
       }
+    } else if (this.isClientHttpError(exception)) {
+      // body-parser errors (413 too large, 400 malformed JSON) are http-errors, not HttpException.
+      status = exception.status;
+      message = status === HttpStatus.PAYLOAD_TOO_LARGE ? 'Payload too large' : 'Bad request';
     } else if (exception instanceof Error) {
       // Never echo internal messages (Prisma errors include table/column names).
       this.logger.error(exception.message, exception.stack);
@@ -42,5 +46,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
       ...(errors && { errors }),
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private isClientHttpError(exception: unknown): exception is Error & { status: number } {
+    if (!(exception instanceof Error)) return false;
+    const { status, expose } = exception as Error & { status?: unknown; expose?: unknown };
+    return expose === true && typeof status === 'number' && status >= 400 && status < 500;
   }
 }

@@ -46,6 +46,41 @@ describe("HttpExceptionFilter", () => {
     expect(body).not.toHaveProperty("stack");
   });
 
+  it("maps exposed client http-errors (body-parser 413) without leaking details", () => {
+    const { host, status, json } = makeHost("http");
+    const error = Object.assign(new Error("request entity too large"), {
+      status: 413,
+      expose: true,
+    });
+
+    filter.catch(error, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.PAYLOAD_TOO_LARGE);
+    expect(json.mock.calls[0][0].message).toBe("Payload too large");
+  });
+
+  it("maps malformed JSON parser errors to a generic 400", () => {
+    const { host, status, json } = makeHost("http");
+    const error = Object.assign(new SyntaxError("Expected double-quoted property name"), {
+      status: 400,
+      expose: true,
+    });
+
+    filter.catch(error, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+    expect(json.mock.calls[0][0].message).toBe("Bad request");
+  });
+
+  it("does not trust a 4xx status on errors that are not exposed", () => {
+    const { host, status } = makeHost("http");
+    const error = Object.assign(new Error("internal"), { status: 418, expose: false });
+
+    filter.catch(error, host);
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+  });
+
   it("handles non-Error throwables as 500 with the generic message", () => {
     const { host, status, json } = makeHost("http");
 
