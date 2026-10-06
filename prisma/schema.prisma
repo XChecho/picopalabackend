@@ -8,157 +8,221 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ─────────────────────────────────────────────
+// Identity
+// ─────────────────────────────────────────────
+
 model Player {
-  id              String    @id @default(uuid())
-  username        String    @unique
-  email           String    @unique
-  password        String
-  avatar          String?
-  expoPushToken   String?
-  language        String    @default("en")
-  elo             Int       @default(1000)
-  trophies        Int       @default(100)
-  rank            String    @default("BRONCE")
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique @db.VarChar(24)
+  email        String    @unique @db.VarChar(254)
+  // Optional so social login can be added later without a breaking change.
+  passwordHash String?
+  avatarUrl    String?
+  language     Language  @default(ES)
+  elo          Int       @default(1000)
+  rank         Rank      @default(PLATA)
+  lastSeenAt   DateTime?
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  // Relations
-  refreshTokens RefreshToken[]
-  matchesAsP1   Match[]          @relation("Player1Matches")
-  matchesAsP2   Match[]          @relation("Player2Matches")
-  moves         Move[]
-  roomsHosted   Room[]           @relation("HostedRooms")
-  roomsJoined   Room[]           @relation("JoinedRooms")
-  stats         Stats?
-  eloHistory    EloHistory[]
+  sessions       Session[]
+  devices        Device[]
+  participations MatchParticipant[]
+  roomsHosted    Room[]
+  stats          PlayerStats[]
 
+  @@index([elo])
   @@map("players")
 }
 
-model RefreshToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
-  playerId  String
+model Session {
+  id        String    @id @default(uuid()) @db.Uuid
+  playerId  String    @db.Uuid
+  // SHA-256 of the refresh token; the raw token is never stored.
+  tokenHash String    @unique @db.Char(64)
+  // Shared by every token of one rotation chain; reuse of a revoked token revokes the family.
+  familyId  String    @db.Uuid
+  platform  Platform
+  userAgent String?
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
 
   player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
-  @@map("refresh_tokens")
+  @@index([playerId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("sessions")
 }
 
-model Stats {
-  id              String  @id @default(uuid())
-  playerId        String  @unique
-  totalGames      Int     @default(0)
-  wins            Int     @default(0)
-  losses          Int     @default(0)
-  draws           Int     @default(0)
-  bestScore       Int     @default(0)
-  currentStreak   Int     @default(0)
-  bestStreak      Int     @default(0)
-  avgTimePerGame  Int     @default(0)
-  totalPicos      Int     @default(0)
-  totalPalas      Int     @default(0)
+model Device {
+  id         String   @id @default(uuid()) @db.Uuid
+  playerId   String   @db.Uuid
+  platform   Platform
+  pushToken  String   @unique
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
 
-  @@map("stats")
+  @@index([playerId])
+  @@map("devices")
 }
+
+// ─────────────────────────────────────────────
+// Game
+// ─────────────────────────────────────────────
 
 model Match {
-  id            String      @id @default(uuid())
-  mode          GameMode
-  status        MatchStatus @default(WAITING)
-  player1Id     String
-  player2Id     String?
-  player1Number String
-  player2Number String?
-  currentTurn   Int         @default(1)
-  turnCount     Int         @default(0)
-  maxTurns      Int         @default(10)
-  winnerId      String?
-  roomId        String?     @unique
-  aiDifficulty  Difficulty?
-  startedAt     DateTime    @default(now())
-  finishedAt    DateTime?
-  createdAt     DateTime    @default(now())
+  id             String      @id @default(uuid()) @db.Uuid
+  mode           GameMode
+  status         MatchStatus @default(WAITING)
+  endReason      EndReason?
+  source         MatchSource @default(ONLINE)
+  // Client-generated id for offline matches; makes /stats/sync idempotent.
+  clientMatchId  String?     @unique @db.Uuid
+  isRanked       Boolean     @default(false)
+  maxTurns       Int         @default(12) @db.SmallInt
+  aiDifficulty   Difficulty?
+  // Seat (1 or 2) that played first, and whose turn it is now.
+  startingSeat   Int?        @db.SmallInt
+  currentSeat    Int?        @db.SmallInt
+  // Deadline for the current turn (global timeout / private async reminder).
+  turnDeadlineAt DateTime?
+  roomId         String?     @unique @db.Uuid
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  // Relations
-  player1    Player       @relation("Player1Matches", fields: [player1Id], references: [id])
-  player2    Player?      @relation("Player2Matches", fields: [player2Id], references: [id])
-  room       Room?
-  moves      Move[]
-  eloHistory EloHistory[]
+  room         Room?              @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  participants MatchParticipant[]
+  moves        Move[]
 
-  @@index([player1Id])
-  @@index([player2Id])
-  @@index([status])
-  @@index([roomId])
+  @@index([status, mode])
+  @@index([finishedAt])
   @@map("matches")
 }
 
-model Move {
-  id         String   @id @default(uuid())
-  matchId    String
-  playerId   String?
-  turnNumber Int
-  guess      String
-  palas      Int
-  picos      Int
-  isWin      Boolean  @default(false)
-  createdAt  DateTime @default(now())
+model MatchParticipant {
+  id           String       @id @default(uuid()) @db.Uuid
+  matchId      String       @db.Uuid
+  seat         Int          @db.SmallInt
+  // Null when the seat is the AI.
+  playerId     String?      @db.Uuid
+  isAi         Boolean      @default(false)
+  // Never select this for the opponent; see MatchService projections.
+  secretNumber String?      @db.Char(4)
+  result       MatchResult?
+  attemptsUsed Int          @default(0) @db.SmallInt
+  eloBefore    Int?
+  eloAfter     Int?
+  rankBefore   Rank?
+  rankAfter    Rank?
+  createdAt    DateTime     @default(now())
 
-  match  Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  match  Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
   player Player? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  moves  Move[]
 
-  @@index([matchId])
-  @@index([playerId])
+  @@unique([matchId, seat])
+  @@unique([matchId, playerId])
+  @@index([playerId, createdAt])
+  @@map("match_participants")
+}
+
+model Move {
+  id            String   @id @default(uuid()) @db.Uuid
+  matchId       String   @db.Uuid
+  participantId String   @db.Uuid
+  turnNumber    Int      @db.SmallInt
+  guess         String   @db.Char(4)
+  picos         Int      @db.SmallInt
+  palas         Int      @db.SmallInt
+  isWin         Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  match       Match            @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  participant MatchParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  // A player can't repeat a guess, and has one move per turn.
+  @@unique([participantId, guess])
+  @@unique([participantId, turnNumber])
+  @@index([matchId, createdAt])
   @@map("moves")
 }
 
-model EloHistory {
-  id          String   @id @default(uuid())
-  playerId    String
-  matchId     String
-  oldElo      Int
-  newElo      Int
-  oldTrophies Int
-  newTrophies Int
-  oldRank     String
-  newRank     String
-  createdAt   DateTime @default(now())
+// Private rooms only. Global matchmaking queue lives in Redis.
+model Room {
+  id        String     @id @default(uuid()) @db.Uuid
+  code      String     @unique @db.VarChar(8)
+  hostId    String     @db.Uuid
+  status    RoomStatus @default(WAITING)
+  maxTurns  Int        @default(12) @db.SmallInt
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
-  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  match  Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  host  Player @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  match Match?
 
-  @@index([playerId])
-  @@index([matchId])
-  @@map("elo_history")
+  @@index([hostId])
+  @@index([status, expiresAt])
+  @@map("rooms")
 }
 
-model Room {
-  id        String     @id @default(uuid())
-  code      String     @unique
-  type      RoomType
-  hostId    String
-  guestId   String?
-  matchId   String?    @unique
-  maxTurns  Int        @default(10)
-  status    RoomStatus @default(WAITING)
-  createdAt DateTime   @default(now())
-  expiresAt DateTime
+// ─────────────────────────────────────────────
+// Stats
+// ─────────────────────────────────────────────
 
-  // Relations
-  host    Player @relation("HostedRooms", fields: [hostId], references: [id])
-  guest   Player? @relation("JoinedRooms", fields: [guestId], references: [id])
-  match   Match?  @relation(fields: [matchId], references: [id])
+model PlayerStats {
+  playerId         String   @db.Uuid
+  mode             GameMode
+  games            Int      @default(0)
+  wins             Int      @default(0)
+  losses           Int      @default(0)
+  draws            Int      @default(0)
+  currentStreak    Int      @default(0)
+  bestStreak       Int      @default(0)
+  // Fewest attempts needed to win (null until the first win).
+  bestAttempts     Int?     @db.SmallInt
+  totalAttempts    Int      @default(0)
+  totalPicos       Int      @default(0)
+  totalPalas       Int      @default(0)
+  totalDurationSec Int      @default(0)
+  updatedAt        DateTime @updatedAt
 
-  @@index([type])
-  @@index([status])
-  @@index([guestId])
-  @@index([expiresAt])
-  @@map("rooms")
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@id([playerId, mode])
+  @@map("player_stats")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Language {
+  ES
+  EN
+  PT
+}
+
+enum Rank {
+  BRONCE
+  PLATA
+  ORO
+  PLATINO
+  DIAMANTE
+}
+
+enum Platform {
+  IOS
+  ANDROID
+  WEB
 }
 
 enum GameMode {
@@ -171,6 +235,26 @@ enum MatchStatus {
   WAITING
   PLAYING
   FINISHED
+  CANCELLED
+}
+
+enum EndReason {
+  GUESSED
+  MAX_TURNS
+  ABANDONED
+  TIMEOUT
+  RESIGNED
+}
+
+enum MatchSource {
+  ONLINE
+  OFFLINE_SYNC
+}
+
+enum MatchResult {
+  WIN
+  LOSS
+  DRAW
 }
 
 enum Difficulty {
@@ -179,14 +263,9 @@ enum Difficulty {
   HARD
 }
 
-enum RoomType {
-  PRIVATE
-  GLOBAL
-}
-
 enum RoomStatus {
   WAITING
-  READY
   IN_GAME
   CLOSED
+  EXPIRED
 }
