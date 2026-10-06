@@ -6,13 +6,15 @@ import {
   OnGatewayDisconnect,
   ConnectedSocket,
   MessageBody,
-} from '@nestjs/websockets';
-import { Logger, UseGuards } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
-import { MatchService } from './match.service';
-import { WsJwtAuthGuard } from '../auth/guards/ws-jwt-auth.guard';
+} from "@nestjs/websockets";
+import { Logger, UseGuards } from "@nestjs/common";
+import { EndReason } from "@prisma/client";
+import { ConfigService } from "@nestjs/config";
+import { Server, Socket } from "socket.io";
+import { JwtService } from "@nestjs/jwt";
+import { MatchService } from "./match.service";
+import { WsJwtAuthGuard } from "../auth/guards/ws-jwt-auth.guard";
+import { corsOriginResolver } from "../common/utils/cors.util";
 
 interface DisconnectTimer {
   timeout: NodeJS.Timeout;
@@ -20,9 +22,9 @@ interface DisconnectTimer {
 }
 
 @WebSocketGateway({
-  namespace: '/match',
+  namespace: "/match",
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:8081',
+    origin: corsOriginResolver,
   },
 })
 @UseGuards(WsJwtAuthGuard)
@@ -43,7 +45,7 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const token =
         client.handshake?.auth?.token ||
-        client.handshake?.headers?.authorization?.replace('Bearer ', '');
+        client.handshake?.headers?.authorization?.replace("Bearer ", "");
 
       if (!token) {
         this.logger.warn(`Rejected connection ${client.id}: no token`);
@@ -52,7 +54,7 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const payload = this.jwtService.verify(token, {
-        secret: this.configService.get<string>('JWT_SECRET'),
+        secret: this.configService.get<string>("JWT_SECRET"),
       });
       client.data.user = payload;
 
@@ -63,7 +65,7 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         client.data.currentMatchId = timer.matchId;
         client.join(timer.matchId);
-        this.server.to(timer.matchId).emit('opponent_reconnected', {
+        this.server.to(timer.matchId).emit("opponent_reconnected", {
           playerId: payload.sub,
         });
 
@@ -91,22 +93,27 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    this.server.to(matchId).emit('opponent_disconnected', {
+    this.server.to(matchId).emit("opponent_disconnected", {
       playerId: userId,
     });
 
     const timeout = setTimeout(async () => {
       this.disconnectTimers.delete(userId);
       try {
-        const updatedMatch = await this.matchService.forfeitMatch(userId, matchId);
-        this.server.to(matchId).emit('match_finished', {
+        const updatedMatch = await this.matchService.forfeitMatch(
+          userId,
+          matchId,
+        );
+        this.server.to(matchId).emit("match_finished", {
           matchId,
           winnerId: updatedMatch.winnerId,
-          reason: 'forfeit',
+          reason: this.reasonLabel(updatedMatch.endReason, false),
           forfeitedBy: userId,
         });
       } catch (error) {
-        this.logger.error(`Error forfeiting match: ${(error as Error).message}`);
+        this.logger.error(
+          `Error forfeiting match: ${(error as Error).message}`,
+        );
       }
     }, 60000);
 
@@ -117,27 +124,37 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
   }
 
-  @SubscribeMessage('join_match')
-  handleJoinMatch(
+  @SubscribeMessage("join_match")
+  async handleJoinMatch(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { matchId: string },
   ) {
+    const playerId = client.data.user?.sub;
+    if (
+      !playerId ||
+      !(await this.matchService.isParticipant(playerId, data.matchId))
+    ) {
+      return {
+        event: "error",
+        data: { message: "Not authorized to join this match" },
+      };
+    }
     client.join(data.matchId);
     client.data.currentMatchId = data.matchId;
-    return { event: 'joined_match', data: { matchId: data.matchId } };
+    return { event: "joined_match", data: { matchId: data.matchId } };
   }
 
-  @SubscribeMessage('leave_match')
+  @SubscribeMessage("leave_match")
   handleLeaveMatch(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { matchId: string },
   ) {
     client.leave(data.matchId);
     client.data.currentMatchId = undefined;
-    return { event: 'left_match', data: { matchId: data.matchId } };
+    return { event: "left_match", data: { matchId: data.matchId } };
   }
 
-  @SubscribeMessage('submit_move')
+  @SubscribeMessage("submit_move")
   async handleSubmitMove(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { matchId: string; guess: string },
@@ -145,7 +162,7 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const playerId = client.data.user?.sub;
       if (!playerId) {
-        return { event: 'error', data: { message: 'Not authenticated' } };
+        return { event: "error", data: { message: "Not authenticated" } };
       }
 
       const result = await this.matchService.submitMove(
@@ -154,7 +171,7 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data.guess,
       );
 
-      this.server.to(data.matchId).emit('opponent_move', {
+      this.server.to(data.matchId).emit("opponent_move", {
         playerId,
         guess: data.guess,
         palas: result.move.palas,
@@ -162,28 +179,37 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
         isWin: result.move.isWin,
       });
 
-      if ((result.matchStatus as string) === 'FINISHED') {
-        let winnerId: string | null = null;
-        let reason = 'max_turns';
-
-        if (result.move.isWin) {
-          winnerId = playerId;
-          reason = 'guessed';
-        } else if (result.aiMove?.isWin) {
-          winnerId = null;
-          reason = 'ai_guessed';
-        }
-
-        this.server.to(data.matchId).emit('match_finished', {
+      if (result.matchStatus === "FINISHED") {
+        this.server.to(data.matchId).emit("match_finished", {
           matchId: data.matchId,
-          winnerId,
-          reason,
+          winnerId: result.winnerId,
+          reason: this.reasonLabel(
+            result.endReason,
+            result.aiMove?.isWin === true,
+          ),
         });
       }
 
-      return { event: 'move_submitted', data: result };
+      return { event: "move_submitted", data: result };
     } catch (error) {
-      return { event: 'error', data: { message: (error as Error).message } };
+      return { event: "error", data: { message: (error as Error).message } };
+    }
+  }
+
+  private reasonLabel(reason: EndReason | null, aiGuessed: boolean): string {
+    switch (reason) {
+      case EndReason.GUESSED:
+        return aiGuessed ? "ai_guessed" : "guessed";
+      case EndReason.MAX_TURNS:
+        return "max_turns";
+      case EndReason.ABANDONED:
+        return "forfeit";
+      case EndReason.RESIGNED:
+        return "resigned";
+      case EndReason.TIMEOUT:
+        return "timeout";
+      default:
+        return "max_turns";
     }
   }
 }

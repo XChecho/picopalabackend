@@ -6,22 +6,25 @@ import {
   OnGatewayDisconnect,
   ConnectedSocket,
   MessageBody,
-} from '@nestjs/websockets';
-import { Logger, UseGuards } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
-import { RoomService } from './room.service';
-import { WsJwtAuthGuard } from '../auth/guards/ws-jwt-auth.guard';
+} from "@nestjs/websockets";
+import { Logger, OnModuleInit, UseGuards } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Server, Socket } from "socket.io";
+import { JwtService } from "@nestjs/jwt";
+import { IMatchFoundEvent, RoomService } from "./room.service";
+import { WsJwtAuthGuard } from "../auth/guards/ws-jwt-auth.guard";
+import { corsOriginResolver } from "../common/utils/cors.util";
 
 @WebSocketGateway({
-  namespace: '/matchmaking',
+  namespace: "/matchmaking",
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:8081',
+    origin: corsOriginResolver,
   },
 })
 @UseGuards(WsJwtAuthGuard)
-export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RoomGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
+{
   @WebSocketServer()
   server: Server;
 
@@ -33,11 +36,28 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly configService: ConfigService,
   ) {}
 
+  onModuleInit() {
+    this.roomService.onMatchFound((event) => this.broadcastMatchFound(event));
+  }
+
+  private broadcastMatchFound(event: IMatchFoundEvent): void {
+    for (const player of event.players) {
+      const opponent = event.players.find((p) => p.id !== player.id);
+      this.server.to(`player:${player.id}`).emit("match_found", {
+        matchId: event.matchId,
+        roomId: event.roomId,
+        opponent: opponent
+          ? { id: opponent.id, username: opponent.username }
+          : null,
+      });
+    }
+  }
+
   handleConnection(client: Socket) {
     try {
       const token =
         client.handshake?.auth?.token ||
-        client.handshake?.headers?.authorization?.replace('Bearer ', '');
+        client.handshake?.headers?.authorization?.replace("Bearer ", "");
 
       if (!token) {
         this.logger.warn(`Rejected connection ${client.id}: no token`);
@@ -46,9 +66,10 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const payload = this.jwtService.verify(token, {
-        secret: this.configService.get<string>('JWT_SECRET'),
+        secret: this.configService.get<string>("JWT_SECRET"),
       });
       client.data.user = payload;
+      client.join(`player:${payload.sub}`);
 
       this.logger.log(
         `Client connected to matchmaking: ${client.id} (player: ${payload.sub})`,
@@ -63,53 +84,51 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`Client disconnected from matchmaking: ${client.id}`);
   }
 
-  @SubscribeMessage('join_queue')
+  @SubscribeMessage("join_queue")
   async handleJoinQueue(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { maxTurns: number },
   ) {
     const playerId = client.data.user?.sub;
     if (!playerId) {
-      return { event: 'error', data: { message: 'Not authenticated' } };
+      return { event: "error", data: { message: "Not authenticated" } };
     }
 
-    const result = await this.roomService.joinGlobalQueue(
-      playerId,
-      data.maxTurns,
-    );
+    try {
+      const result = await this.roomService.joinGlobalQueue(
+        playerId,
+        data?.maxTurns,
+      );
 
-    if ('status' in result && result.status === 'queued') {
-      return {
-        event: 'queue_update',
-        data: {
-          position: result.queuePosition,
-          estimatedWait: result.estimatedWait,
-        },
-      };
+      if (result.status === "queued") {
+        return {
+          event: "queue_update",
+          data: {
+            position: result.queuePosition,
+            estimatedWait: result.estimatedWait,
+          },
+        };
+      }
+
+      // match_found is pushed to both players by the onMatchFound listener.
+      return result;
+    } catch (error) {
+      return { event: "error", data: { message: (error as Error).message } };
     }
-
-    if ('match' in result) {
-      this.server.to(client.id).emit('match_found', {
-        matchId: result.match.id,
-        roomId: result.room.id,
-        opponent: {
-          id: result.room.hostId,
-          username: '',
-        },
-      });
-    }
-
-    return result;
   }
 
-  @SubscribeMessage('leave_queue')
+  @SubscribeMessage("leave_queue")
   async handleLeaveQueue(@ConnectedSocket() client: Socket) {
     const playerId = client.data.user?.sub;
     if (!playerId) {
-      return { event: 'error', data: { message: 'Not authenticated' } };
+      return { event: "error", data: { message: "Not authenticated" } };
     }
 
-    await this.roomService.leaveGlobalQueue(playerId);
-    return { event: 'left_queue' };
+    try {
+      await this.roomService.leaveGlobalQueue(playerId);
+      return { event: "left_queue" };
+    } catch (error) {
+      return { event: "error", data: { message: (error as Error).message } };
+    }
   }
 }
