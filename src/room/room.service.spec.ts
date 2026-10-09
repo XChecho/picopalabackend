@@ -203,6 +203,20 @@ describe("RoomService", () => {
       expect(result.match.player2Id).toBe("guest");
     });
 
+    it("creates a private match WAITING for secrets with a 60s setup clock", async () => {
+      prisma.room.findUnique.mockResolvedValue(waitingRoom());
+
+      await service.joinPrivateRoom("guest", "ABC123");
+
+      const data = tx.match.create.mock.calls[0][0].data;
+      expect(data.status).toBe(MatchStatus.WAITING);
+      expect(data.currentSeat).toBeNull();
+      expect(data.startedAt).toBeNull();
+      expect(data.turnDeadlineAt).toEqual(new Date(NOW.getTime() + 60_000));
+      expect(data.participants.create[0].secretNumber).toBeUndefined();
+      expect(data.participants.create[1].secretNumber).toBeUndefined();
+    });
+
     it("never selects or returns secret numbers", async () => {
       prisma.room.findUnique.mockResolvedValue(waitingRoom());
 
@@ -501,6 +515,73 @@ describe("RoomService", () => {
       });
       expect(redis.zrem).toHaveBeenCalledWith(QUEUE_KEY, "p1");
       expect(redis.del).toHaveBeenCalledWith(TICKET + "p1");
+    });
+  });
+
+  describe("getRoom / cancelPrivateRoom", () => {
+    const roomRow = {
+      id: "room-1",
+      code: "ABC123",
+      hostId: "host",
+      status: RoomStatus.IN_GAME,
+      maxTurns: 12,
+      expiresAt: new Date(NOW.getTime() + 60_000),
+      match: {
+        id: "match-1",
+        status: MatchStatus.WAITING,
+        participants: [
+          { seat: 1, playerId: "host" },
+          { seat: 2, playerId: "guest" },
+        ],
+      },
+    };
+
+    it("shows the room to host and guest with the match reference", async () => {
+      prisma.room.findUnique.mockResolvedValue(roomRow);
+
+      const asGuest = await service.getRoom("guest", " abc123");
+
+      expect(prisma.room.findUnique.mock.calls[0][0].where).toEqual({
+        code: "ABC123",
+      });
+      expect(asGuest).toMatchObject({
+        guestId: "guest",
+        matchId: "match-1",
+        matchStatus: MatchStatus.WAITING,
+      });
+      await expect(service.getRoom("host", "ABC123")).resolves.toBeDefined();
+    });
+
+    it("answers 404 to strangers and unknown codes", async () => {
+      prisma.room.findUnique.mockResolvedValueOnce(roomRow);
+      await expect(service.getRoom("stranger", "ABC123")).rejects.toThrow(
+        NotFoundException,
+      );
+      prisma.room.findUnique.mockResolvedValueOnce(null);
+      await expect(service.getRoom("host", "NOPE00")).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it("lets only the host close a room that is still WAITING", async () => {
+      prisma.room.findUnique.mockResolvedValue({
+        id: "room-1",
+        hostId: "host",
+      });
+
+      await service.cancelPrivateRoom("host", "ABC123");
+      expect(prisma.room.updateMany).toHaveBeenCalledWith({
+        where: { id: "room-1", status: RoomStatus.WAITING },
+        data: { status: RoomStatus.CLOSED },
+      });
+
+      await expect(
+        service.cancelPrivateRoom("guest", "ABC123"),
+      ).rejects.toThrow(NotFoundException);
+      prisma.room.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.cancelPrivateRoom("host", "ABC123")).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 });

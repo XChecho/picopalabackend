@@ -887,13 +887,19 @@ function hardAIMove(moves: Move[]): string {
 - Al finalizar partida, si el jugador tiene cuenta, sincroniza stats con backend.
 - Endpoint: `POST /api/v1/stats/sync` para sincronizar partidas offline.
 
-### 8.2 Private Room (Async)
-- Turnos asíncronos: cada jugador juega cuando pueda.
-- Cola de movimientos pendientes en cliente.
-- Al reconectar, envía movimientos pendientes.
-- Push notification al oponente cuando hay turno nuevo.
+### 8.2 Private Room (tiempo real, reloj en servidor)
+- Ambos jugadores están conectados. Reloj de **60s por turno** y **60s para elegir secreto**, guardado en `matches.turnDeadlineAt` (la UI solo lo dibuja; recargar no lo reinicia).
+- Flujo: `POST /room/private` → el invitado hace `POST /room/private/join` → la partida nace `WAITING` → cada jugador envía `POST /match/:id/secret` con `{ "secret": "1234" }` o `{ "random": true }` → al fijar ambos pasa a `PLAYING` (evento `match_started`). Si vence el plazo, el servidor asigna secreto aleatorio a quien no lo fijó.
+- Turno vencido: el servidor juega un número aleatorio no repetido (misma lógica que la IA fácil) y emite `opponent_move` con `auto: true`. A la 3.ª auto-jugada seguida el ausente pierde por `TIMEOUT`.
+- Una jugada manual recibida después de `turnDeadlineAt` responde 409 `Turn time expired`.
+- Desconexión: `participants.disconnectedAt` persistido; pasados 60s sin `join_match` el jugador pierde por abandono (si ambos están desconectados: empate sin cambio de ELO). Tras reiniciar el servidor todos los relojes y periodos de gracia se reinician.
+- Retomar tras recargar: `GET /match/active` → `GET /match/:id` (incluye `turnDeadlineAt`, `currentSeat`) → socket `join_match`. **El cliente debe emitir `join_match` en cada (re)conexión.**
+- Sala: `GET /room/private/:code` (host o invitado), `DELETE /room/private/:code` (host, solo `WAITING`). Salas sin usar expiran a la hora.
+- Eventos de `/match`: `opponent_ready`, `match_started`, `opponent_move`, `match_finished`, `opponent_disconnected`, `opponent_reconnected`.
+- Despliegue: el scheduler asume **una sola instancia**. Con réplicas, `SCHEDULER_ENABLED=false` en las demás y adapter Redis de Socket.IO.
 
 ### 8.3 Global Room (Real-time)
+- Misma regla de reloj de turno (60s, auto-jugada, TIMEOUT); secretos asignados por el servidor.
 - WebSocket para sincronización en tiempo real.
 - Si se pierde conexión, se guarda estado local.
 - Reconexión automática con re-sync de estado.

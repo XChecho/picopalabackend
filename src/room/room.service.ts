@@ -13,6 +13,7 @@ import Redis from "ioredis";
 import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 import { GameService } from "../game/game.service";
+import { SETUP_TIMEOUT_MS, TURN_TIMEOUT_MS } from "../match/match.constants";
 
 const ROOM_CODE_LENGTH = 6;
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -52,6 +53,8 @@ interface IHumanMatchParams {
   roomId: string | null;
   seat1PlayerId: string;
   seat2PlayerId: string;
+  /** true: players pick their own secret first (match starts WAITING). */
+  awaitSecrets: boolean;
 }
 
 @Injectable()
@@ -162,6 +165,7 @@ export class RoomService {
         roomId: room.id,
         seat1PlayerId: room.hostId,
         seat2PlayerId: guestId,
+        awaitSecrets: true,
       });
     });
 
@@ -178,6 +182,67 @@ export class RoomService {
       },
       match: this.toMatchView(match, room.hostId, guestId),
     };
+  }
+
+  /** Room state for the host or the guest; anyone else gets a 404. */
+  async getRoom(playerId: string, code: string) {
+    const room = await this.prismaService.room.findUnique({
+      where: { code: code.trim().toUpperCase() },
+      select: {
+        id: true,
+        code: true,
+        hostId: true,
+        status: true,
+        maxTurns: true,
+        expiresAt: true,
+        match: {
+          select: {
+            id: true,
+            status: true,
+            participants: { select: { seat: true, playerId: true } },
+          },
+        },
+      },
+    });
+
+    const guestId =
+      room?.match?.participants.find((p) => p.playerId !== room.hostId)
+        ?.playerId ?? null;
+    if (!room || (room.hostId !== playerId && guestId !== playerId)) {
+      throw new NotFoundException("Room not found");
+    }
+
+    return {
+      id: room.id,
+      code: room.code,
+      hostId: room.hostId,
+      guestId,
+      status: room.status,
+      maxTurns: room.maxTurns,
+      expiresAt: room.expiresAt,
+      matchId: room.match?.id ?? null,
+      matchStatus: room.match?.status ?? null,
+    };
+  }
+
+  /** Host closes a room nobody has joined yet. */
+  async cancelPrivateRoom(hostId: string, code: string) {
+    const room = await this.prismaService.room.findUnique({
+      where: { code: code.trim().toUpperCase() },
+      select: { id: true, hostId: true },
+    });
+    if (!room || room.hostId !== hostId) {
+      throw new NotFoundException("Room not found");
+    }
+
+    const claim = await this.prismaService.room.updateMany({
+      where: { id: room.id, status: RoomStatus.WAITING },
+      data: { status: RoomStatus.CLOSED },
+    });
+    if (claim.count !== 1) {
+      throw new ConflictException("Room can no longer be cancelled");
+    }
+    return { message: "Room closed" };
   }
 
   async joinGlobalQueue(
@@ -321,6 +386,7 @@ export class RoomService {
           roomId: null,
           seat1PlayerId: seat1,
           seat2PlayerId: seat2,
+          awaitSecrets: false,
         }),
       );
 
@@ -349,29 +415,37 @@ export class RoomService {
     params: IHumanMatchParams,
   ) {
     const startingSeat = randomInt(1, 3);
+    const now = Date.now();
+    // Secrets are chosen by the players (WAITING) or assigned here (PLAYING);
+    // either way they are written but deliberately not selected back.
+    const secretFor = (): string | undefined =>
+      params.awaitSecrets ? undefined : this.gameService.generateSecretNumber();
 
-    // Secrets are written but deliberately not selected back.
     return tx.match.create({
       data: {
         mode: params.mode,
-        status: MatchStatus.PLAYING,
+        status: params.awaitSecrets ? MatchStatus.WAITING : MatchStatus.PLAYING,
         isRanked: params.isRanked,
         maxTurns: params.maxTurns,
         startingSeat,
-        currentSeat: startingSeat,
+        currentSeat: params.awaitSecrets ? null : startingSeat,
+        // Server clock: secret selection while WAITING, turn clock while PLAYING.
+        turnDeadlineAt: new Date(
+          now + (params.awaitSecrets ? SETUP_TIMEOUT_MS : TURN_TIMEOUT_MS),
+        ),
         roomId: params.roomId,
-        startedAt: new Date(),
+        startedAt: params.awaitSecrets ? null : new Date(now),
         participants: {
           create: [
             {
               seat: 1,
               playerId: params.seat1PlayerId,
-              secretNumber: this.gameService.generateSecretNumber(),
+              secretNumber: secretFor(),
             },
             {
               seat: 2,
               playerId: params.seat2PlayerId,
-              secretNumber: this.gameService.generateSecretNumber(),
+              secretNumber: secretFor(),
             },
           ],
         },
@@ -383,6 +457,7 @@ export class RoomService {
         maxTurns: true,
         startingSeat: true,
         currentSeat: true,
+        turnDeadlineAt: true,
       },
     });
   }
@@ -395,6 +470,7 @@ export class RoomService {
       maxTurns: number;
       startingSeat: number | null;
       currentSeat: number | null;
+      turnDeadlineAt: Date | null;
     },
     player1Id: string,
     player2Id: string,
@@ -407,6 +483,7 @@ export class RoomService {
       player2Id,
       currentTurn: 1,
       currentSeat: match.currentSeat,
+      turnDeadlineAt: match.turnDeadlineAt,
       startingSeat: match.startingSeat,
       maxTurns: match.maxTurns,
     };

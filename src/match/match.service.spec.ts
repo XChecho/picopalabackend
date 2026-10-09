@@ -17,7 +17,7 @@ import { AiService } from "../game/ai/ai.service";
 import { GameService } from "../game/game.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { StatsService } from "../stats/stats.service";
-import { MatchService } from "./match.service";
+import { MatchEvent, MatchService } from "./match.service";
 
 const HUMAN_SECRET = "1234";
 const AI_SECRET = "5678";
@@ -100,8 +100,20 @@ const moveRow = (
 describe("MatchService", () => {
   let service: MatchService;
   let prisma: {
-    match: { findUnique: jest.Mock; create: jest.Mock; findFirst: jest.Mock };
-    matchParticipant: { findUnique: jest.Mock; findFirst: jest.Mock };
+    match: {
+      findUnique: jest.Mock;
+      create: jest.Mock;
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    matchParticipant: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      updateMany: jest.Mock;
+      count: jest.Mock;
+    };
     move: { findMany: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -133,10 +145,15 @@ describe("MatchService", () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       matchParticipant: {
         findUnique: jest.fn().mockResolvedValue({ secretNumber: HUMAN_SECRET }),
         findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        count: jest.fn().mockResolvedValue(0),
       },
       move: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn((fn: (t: Prisma.TransactionClient) => unknown) =>
@@ -284,7 +301,7 @@ describe("MatchService", () => {
           currentSeat: 1,
           updatedAt: new Date("2025-01-01T00:00:00Z"),
         },
-        data: { currentSeat: 1 },
+        data: { currentSeat: 1, turnDeadlineAt: null },
       });
       expect(tx.match.update).not.toHaveBeenCalled();
       expectNoSecret(result);
@@ -769,9 +786,33 @@ describe("MatchService", () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
+    it("cancels a WAITING match without a winner or stats", async () => {
+      prisma.match.findUnique
+        .mockResolvedValueOnce(
+          forfeitRow({ status: MatchStatus.WAITING, roomId: "r1" }),
+        )
+        .mockResolvedValueOnce(summary);
+      const events: MatchEvent[] = [];
+      service.onMatchEvent((e) => events.push(e));
+
+      await service.forfeitMatch("p1", "m1");
+
+      expect(tx.match.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "m1", status: MatchStatus.WAITING },
+          data: expect.objectContaining({ status: MatchStatus.CANCELLED }),
+        }),
+      );
+      expect(tx.room.updateMany).toHaveBeenCalled();
+      expect(stats.recordResult).not.toHaveBeenCalled();
+      expect(events).toEqual([
+        expect.objectContaining({ type: "finished", winnerId: null }),
+      ]);
+    });
+
     it("throws 409 when the match is not in progress", async () => {
       prisma.match.findUnique.mockResolvedValueOnce(
-        forfeitRow({ status: MatchStatus.WAITING }),
+        forfeitRow({ status: MatchStatus.CANCELLED }),
       );
       await expect(service.forfeitMatch("p1", "m1")).rejects.toThrow(
         "Match is not in progress",
@@ -827,6 +868,400 @@ describe("MatchService", () => {
     it("getActiveMatchByPlayer returns null when nothing is active", async () => {
       prisma.match.findFirst.mockResolvedValue(null);
       await expect(service.getActiveMatchByPlayer("p1")).resolves.toBeNull();
+    });
+  });
+
+  describe("server clocks (human matches)", () => {
+    const pvpMatch = (overrides: Record<string, unknown> = {}) => {
+      const participants = makeParticipants().map((p) => ({
+        ...p,
+        missedTurns: 0,
+      }));
+      participants[1] = { ...participants[1], playerId: "p2", isAi: false };
+      return makeMatchRow({
+        mode: GameMode.PRIVATE,
+        turnDeadlineAt: new Date(Date.now() + 30_000),
+        participants,
+        ...overrides,
+      });
+    };
+
+    it("starts a 60s clock for the opponent after a move and resets missedTurns", async () => {
+      prisma.match.findUnique.mockResolvedValue(pvpMatch());
+      const events: MatchEvent[] = [];
+      service.onMatchEvent((e) => events.push(e));
+
+      const result = await service.submitMove("p1", "m1", "5671");
+
+      const deadline = result.turnDeadlineAt as Date;
+      expect(deadline.getTime() - Date.now()).toBeGreaterThan(55_000);
+      expect(deadline.getTime() - Date.now()).toBeLessThanOrEqual(60_000);
+      expect(tx.match.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { currentSeat: 2, turnDeadlineAt: deadline },
+        }),
+      );
+      expect(tx.matchParticipant.update).toHaveBeenCalledWith({
+        where: { id: "part-1" },
+        data: { attemptsUsed: 1, missedTurns: 0 },
+      });
+      expect(events[0]).toMatchObject({
+        type: "move",
+        auto: false,
+        currentSeat: 2,
+      });
+    });
+
+    it("rejects a manual move after the deadline", async () => {
+      prisma.match.findUnique.mockResolvedValue(
+        pvpMatch({ turnDeadlineAt: new Date(Date.now() - 1_000) }),
+      );
+      await expect(service.submitMove("p1", "m1", "5671")).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it("accepts an auto move after the deadline and counts a missed turn", async () => {
+      prisma.match.findUnique.mockResolvedValue(
+        pvpMatch({ turnDeadlineAt: new Date(Date.now() - 1_000) }),
+      );
+      const events: MatchEvent[] = [];
+      service.onMatchEvent((e) => events.push(e));
+
+      await service.submitMove("p1", "m1", "5671", { auto: true });
+
+      expect(tx.matchParticipant.update).toHaveBeenCalledWith({
+        where: { id: "part-1" },
+        data: { attemptsUsed: 1, missedTurns: 1 },
+      });
+      expect(events[0]).toMatchObject({ type: "move", auto: true });
+    });
+
+    describe("autoPlayTurn", () => {
+      const DUE_AT = new Date(Date.now() - 500);
+      const dueRow = (missedTurns = 0) => ({
+        status: MatchStatus.PLAYING,
+        mode: GameMode.PRIVATE,
+        currentSeat: 1,
+        turnDeadlineAt: DUE_AT,
+        participants: [
+          { seat: 1, playerId: "p1", missedTurns, moves: [{ guess: "1111" }] },
+          { seat: 2, playerId: "p2", missedTurns: 0, moves: [] },
+        ],
+      });
+
+      it("plays a random unused guess for the absent player", async () => {
+        prisma.match.findUnique
+          .mockResolvedValueOnce(dueRow())
+          .mockResolvedValueOnce(pvpMatch({ turnDeadlineAt: DUE_AT }));
+        ai.easyMove.mockReturnValue("5671");
+
+        await expect(service.autoPlayTurn("m1")).resolves.toBe(true);
+
+        expect(ai.easyMove).toHaveBeenCalledWith(["1111"]);
+        expect(tx.move.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ guess: "5671" }),
+          }),
+        );
+      });
+
+      it("makes the absent player lose by TIMEOUT after the max missed turns", async () => {
+        prisma.match.findUnique
+          .mockResolvedValueOnce(dueRow(2))
+          .mockResolvedValueOnce({
+            id: "m1",
+            mode: GameMode.PRIVATE,
+            status: MatchStatus.PLAYING,
+            isRanked: false,
+            roomId: null,
+            startedAt: new Date(),
+            participants: [
+              { seat: 1, playerId: "p1" },
+              { seat: 2, playerId: "p2" },
+            ],
+          })
+          .mockResolvedValueOnce({ id: "m1", participants: [] });
+        tx.matchParticipant.findMany.mockResolvedValue([
+          {
+            id: "part-1",
+            seat: 1,
+            playerId: "p1",
+            isAi: false,
+            attemptsUsed: 2,
+          },
+          {
+            id: "part-2",
+            seat: 2,
+            playerId: "p2",
+            isAi: false,
+            attemptsUsed: 2,
+          },
+        ]);
+
+        await service.autoPlayTurn("m1");
+
+        expect(tx.match.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ endReason: EndReason.TIMEOUT }),
+          }),
+        );
+        expect(tx.move.create).not.toHaveBeenCalled();
+      });
+
+      it("drops a stale auto move when the turn already advanced", async () => {
+        const staleDeadline = new Date(Date.now() - 500);
+        prisma.match.findUnique
+          .mockResolvedValueOnce({ ...dueRow(), turnDeadlineAt: staleDeadline })
+          .mockResolvedValueOnce(
+            pvpMatch({ turnDeadlineAt: new Date(Date.now() + 50_000) }),
+          );
+        await expect(service.autoPlayTurn("m1")).rejects.toThrow(
+          "Turn already advanced",
+        );
+        expect(tx.move.create).not.toHaveBeenCalled();
+      });
+
+      it("does nothing while the clock is still running", async () => {
+        prisma.match.findUnique.mockResolvedValueOnce({
+          ...dueRow(),
+          turnDeadlineAt: new Date(Date.now() + 10_000),
+        });
+        await expect(service.autoPlayTurn("m1")).resolves.toBe(false);
+        expect(tx.move.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("setSecret", () => {
+      const waiting = (status: MatchStatus = MatchStatus.WAITING) => ({
+        id: "m1",
+        status,
+        participants: [
+          { id: "part-1", playerId: "p1" },
+          { id: "part-2", playerId: "p2" },
+        ],
+      });
+      const startRow = { startingSeat: 2 };
+      const view = {
+        id: "m1",
+        mode: GameMode.PRIVATE,
+        status: MatchStatus.PLAYING,
+        participants: [],
+      };
+
+      it("stores the chosen secret, waits for the rival and does not start", async () => {
+        prisma.match.findUnique
+          .mockResolvedValueOnce(waiting())
+          .mockResolvedValueOnce(view);
+        prisma.matchParticipant.count.mockResolvedValue(1);
+
+        const result = await service.setSecret("p1", "m1", { secret: "1234" });
+
+        expect(prisma.matchParticipant.updateMany).toHaveBeenCalledWith({
+          where: { id: "part-1", secretNumber: null },
+          data: { secretNumber: "1234" },
+        });
+        expect(result.started).toBe(false);
+        expect(prisma.match.updateMany).not.toHaveBeenCalled();
+      });
+
+      it("starts the match with the starting seat once both secrets exist", async () => {
+        prisma.match.findUnique
+          .mockResolvedValueOnce(waiting())
+          .mockResolvedValueOnce(startRow)
+          .mockResolvedValueOnce(view);
+        const events: MatchEvent[] = [];
+        service.onMatchEvent((e) => events.push(e));
+
+        const result = await service.setSecret("p2", "m1", { random: true });
+
+        const secret = prisma.matchParticipant.updateMany.mock.calls[0][0].data
+          .secretNumber as string;
+        expect(game.validateGuess(secret).valid).toBe(true);
+        expect(result.started).toBe(true);
+        expect(prisma.match.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: "m1", status: MatchStatus.WAITING },
+            data: expect.objectContaining({
+              status: MatchStatus.PLAYING,
+              currentSeat: 2,
+            }),
+          }),
+        );
+        expect(events.map((e) => e.type)).toEqual(["secret_set", "started"]);
+      });
+
+      it("rejects an invalid, missing or ambiguous secret", async () => {
+        await expect(
+          service.setSecret("p1", "m1", { secret: "1123" }),
+        ).rejects.toThrow(BadRequestException);
+        await expect(service.setSecret("p1", "m1", {})).rejects.toThrow(
+          BadRequestException,
+        );
+        await expect(
+          service.setSecret("p1", "m1", { secret: "1234", random: true }),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it("rejects non participants, started matches and repeated secrets", async () => {
+        prisma.match.findUnique.mockResolvedValueOnce(waiting());
+        await expect(
+          service.setSecret("intruder", "m1", { random: true }),
+        ).rejects.toThrow(ForbiddenException);
+
+        prisma.match.findUnique.mockResolvedValueOnce(
+          waiting(MatchStatus.PLAYING),
+        );
+        await expect(
+          service.setSecret("p1", "m1", { random: true }),
+        ).rejects.toThrow(ConflictException);
+
+        prisma.match.findUnique.mockResolvedValueOnce(waiting());
+        prisma.matchParticipant.updateMany.mockResolvedValueOnce({ count: 0 });
+        await expect(
+          service.setSecret("p1", "m1", { random: true }),
+        ).rejects.toThrow(ConflictException);
+      });
+    });
+
+    describe("completeSetup", () => {
+      it("assigns random secrets to missing seats and starts the match", async () => {
+        prisma.match.findUnique
+          .mockResolvedValueOnce({
+            status: MatchStatus.WAITING,
+            turnDeadlineAt: new Date(Date.now() - 100),
+            participants: [
+              { id: "part-1", secretNumber: "1234" },
+              { id: "part-2", secretNumber: null },
+            ],
+          })
+          .mockResolvedValueOnce({ startingSeat: 1 });
+
+        await expect(service.completeSetup("m1")).resolves.toBe(true);
+
+        expect(prisma.matchParticipant.updateMany).toHaveBeenCalledTimes(1);
+        expect(prisma.matchParticipant.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: "part-2", secretNumber: null },
+          }),
+        );
+      });
+
+      it("ignores matches whose setup clock is still running", async () => {
+        prisma.match.findUnique.mockResolvedValueOnce({
+          status: MatchStatus.WAITING,
+          turnDeadlineAt: new Date(Date.now() + 10_000),
+          participants: [],
+        });
+        await expect(service.completeSetup("m1")).resolves.toBe(false);
+      });
+    });
+
+    describe("resolveAbandoned", () => {
+      const row = (disconnected: [boolean, boolean]) => ({
+        status: MatchStatus.PLAYING,
+        mode: GameMode.GLOBAL,
+        isRanked: true,
+        roomId: null,
+        startedAt: new Date(),
+        participants: [
+          {
+            playerId: "p1",
+            disconnectedAt: disconnected[0] ? new Date() : null,
+          },
+          {
+            playerId: "p2",
+            disconnectedAt: disconnected[1] ? new Date() : null,
+          },
+        ],
+      });
+
+      it("forfeits the absent player when the rival is connected", async () => {
+        prisma.match.findUnique
+          .mockResolvedValueOnce(row([true, false]))
+          .mockResolvedValueOnce({
+            id: "m1",
+            mode: GameMode.GLOBAL,
+            status: MatchStatus.PLAYING,
+            isRanked: true,
+            roomId: null,
+            startedAt: new Date(),
+            participants: [
+              { seat: 1, playerId: "p1" },
+              { seat: 2, playerId: "p2" },
+            ],
+          })
+          .mockResolvedValueOnce({ id: "m1", participants: [] });
+        tx.matchParticipant.findMany.mockResolvedValue([]);
+
+        await service.resolveAbandoned("m1", "p1");
+
+        expect(tx.match.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ endReason: EndReason.ABANDONED }),
+          }),
+        );
+      });
+
+      it("ends as an unranked draw when both players are gone", async () => {
+        prisma.match.findUnique.mockResolvedValueOnce(row([true, true]));
+        tx.matchParticipant.findMany.mockResolvedValue([
+          { id: "a", seat: 1, playerId: "p1", isAi: false, attemptsUsed: 1 },
+          { id: "b", seat: 2, playerId: "p2", isAi: false, attemptsUsed: 1 },
+        ]);
+        const events: MatchEvent[] = [];
+        service.onMatchEvent((e) => events.push(e));
+
+        await service.resolveAbandoned("m1", "p1");
+
+        expect(tx.player.update).not.toHaveBeenCalled();
+        expect(tx.matchParticipant.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ result: "DRAW" }),
+          }),
+        );
+        expect(events).toEqual([
+          expect.objectContaining({ type: "finished", winnerId: null }),
+        ]);
+      });
+    });
+
+    it("gives live human matches fresh clocks after a restart", async () => {
+      await service.resetClocksAfterRestart();
+
+      expect(prisma.matchParticipant.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { disconnectedAt: expect.any(Date) } }),
+      );
+      const deadlines = prisma.match.updateMany.mock.calls.map(
+        (c) => c[0].data.turnDeadlineAt as Date,
+      );
+      expect(deadlines).toHaveLength(2);
+      deadlines.forEach((d) => expect(d.getTime()).toBeGreaterThan(Date.now()));
+    });
+
+    describe("connection tracking", () => {
+      it("flags and clears disconnectedAt", async () => {
+        await service.markDisconnected("p1", "m1");
+        expect(prisma.matchParticipant.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: { disconnectedAt: expect.any(Date) },
+          }),
+        );
+
+        prisma.matchParticipant.updateMany.mockResolvedValueOnce({ count: 1 });
+        await expect(service.markConnected("p1", "m1")).resolves.toBe(true);
+        prisma.matchParticipant.updateMany.mockResolvedValueOnce({ count: 0 });
+        await expect(service.markConnected("p1", "m1")).resolves.toBe(false);
+      });
+
+      it("lists players whose grace period is over", async () => {
+        prisma.matchParticipant.findMany.mockResolvedValue([
+          { matchId: "m1", playerId: "p1" },
+        ]);
+        await expect(service.findAbandonedPlayers(60_000)).resolves.toEqual([
+          { matchId: "m1", playerId: "p1" },
+        ]);
+      });
     });
   });
 });

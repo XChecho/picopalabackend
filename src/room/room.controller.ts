@@ -1,4 +1,12 @@
-import { Controller, Post, Delete, Body, UseGuards } from "@nestjs/common";
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+} from "@nestjs/common";
 import { RoomService } from "./room.service";
 import { CreateRoomDto } from "./dto/create-room.dto";
 import { JoinRoomDto } from "./dto/join-room.dto";
@@ -24,6 +32,22 @@ export class RoomController {
     @Body() joinRoomDto: JoinRoomDto,
   ) {
     return this.roomService.joinPrivateRoom(playerId, joinRoomDto.code);
+  }
+
+  @Get("private/:code")
+  async getPrivateRoom(
+    @CurrentUser("id") playerId: string,
+    @Param("code") code: string,
+  ) {
+    return this.roomService.getRoom(playerId, code);
+  }
+
+  @Delete("private/:code")
+  async cancelPrivateRoom(
+    @CurrentUser("id") playerId: string,
+    @Param("code") code: string,
+  ) {
+    return this.roomService.cancelPrivateRoom(playerId, code);
   }
 
   @Post("global/join")

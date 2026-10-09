@@ -111,7 +111,8 @@ model Match {
   // Seat (1 or 2) that played first, and whose turn it is now.
   startingSeat   Int?        @db.SmallInt
   currentSeat    Int?        @db.SmallInt
-  // Deadline for the current turn (global timeout / private async reminder).
+  // Server-side deadline of the current phase: secret selection while WAITING,
+  // the turn clock while PLAYING. Resolved by MatchSchedulerService.
   turnDeadlineAt DateTime?
   roomId         String?     @unique @db.Uuid
   startedAt      DateTime?
@@ -124,26 +125,31 @@ model Match {
   moves        Move[]
 
   @@index([status, mode])
+  @@index([status, turnDeadlineAt])
   @@index([finishedAt])
   @@map("matches")
 }
 
 model MatchParticipant {
-  id           String       @id @default(uuid()) @db.Uuid
-  matchId      String       @db.Uuid
-  seat         Int          @db.SmallInt
+  id             String       @id @default(uuid()) @db.Uuid
+  matchId        String       @db.Uuid
+  seat           Int          @db.SmallInt
   // Null when the seat is the AI.
-  playerId     String?      @db.Uuid
-  isAi         Boolean      @default(false)
+  playerId       String?      @db.Uuid
+  isAi           Boolean      @default(false)
   // Never select this for the opponent; see MatchService projections.
-  secretNumber String?      @db.Char(4)
-  result       MatchResult?
-  attemptsUsed Int          @default(0) @db.SmallInt
-  eloBefore    Int?
-  eloAfter     Int?
-  rankBefore   Rank?
-  rankAfter    Rank?
-  createdAt    DateTime     @default(now())
+  secretNumber   String?      @db.Char(4)
+  result         MatchResult?
+  attemptsUsed   Int          @default(0) @db.SmallInt
+  eloBefore      Int?
+  eloAfter       Int?
+  rankBefore     Rank?
+  rankAfter      Rank?
+  // Consecutive turns the server had to play for this seat (timeout).
+  missedTurns    Int          @default(0) @db.SmallInt
+  // Set while the player has no live socket; cleared when they rejoin.
+  disconnectedAt DateTime?
+  createdAt      DateTime     @default(now())
 
   match  Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
   player Player? @relation(fields: [playerId], references: [id], onDelete: SetNull)
@@ -152,6 +158,7 @@ model MatchParticipant {
   @@unique([matchId, seat])
   @@unique([matchId, playerId])
   @@index([playerId, createdAt])
+  @@index([disconnectedAt])
   @@map("match_participants")
 }
 
