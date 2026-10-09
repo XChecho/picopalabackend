@@ -1,8 +1,8 @@
-import { timingSafeEqual } from 'crypto';
-import { isIP } from 'net';
+import { timingSafeEqual } from "crypto";
+import { isIP } from "net";
 
-export const BFF_KEY_HEADER = 'x-bff-key';
-export const CLIENT_IP_HEADER = 'x-client-ip';
+export const BFF_KEY_HEADER = "x-bff-key";
+export const CLIENT_IP_HEADER = "x-client-ip";
 
 /** Minimal request shape (works for Express requests and test doubles). */
 export interface IClientIpRequest {
@@ -11,11 +11,11 @@ export interface IClientIpRequest {
 }
 
 const headerValue = (
-  headers: IClientIpRequest['headers'],
+  headers: IClientIpRequest["headers"],
   name: string,
 ): string | undefined => {
   const value = headers?.[name];
-  return typeof value === 'string' ? value : undefined;
+  return typeof value === "string" ? value : undefined;
 };
 
 /** Timing-safe string comparison; different lengths never match. */
@@ -45,5 +45,5 @@ export function getClientIp(
   ) {
     return forwarded;
   }
-  return req.ip ?? '';
+  return req.ip ?? "";
 }

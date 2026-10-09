@@ -1,15 +1,15 @@
-import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { Transform } from "class-transformer";
+import { IsEmail, IsNotEmpty, IsString, MaxLength } from "class-validator";
 
 const collapseSpaces = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : value;
+  typeof value === "string" ? value.replace(/\s+/g, " ").trim() : value;
 
 const cleanMessage = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string'
+  typeof value === "string"
     ? value
-        .replace(/\r\n?/g, '\n')
-        .replace(/[ \t]+/g, ' ')
-        .replace(/\n{3,}/g, '\n\n')
+        .replace(/\r\n?/g, "\n")
+        .replace(/[ \t]+/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
         .trim()
     : value;
 
@@ -21,7 +21,7 @@ export class ContactDto {
   name!: string;
 
   @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toLowerCase() : value,
+    typeof value === "string" ? value.trim().toLowerCase() : value,
   )
   @IsEmail()
   @MaxLength(254)

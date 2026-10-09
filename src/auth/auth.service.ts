@@ -1,17 +1,17 @@
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomUUID } from "crypto";
 import {
   ConflictException,
   Injectable,
   UnauthorizedException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import { Language, Platform, Player, Prisma } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
-import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
-import { PrismaService } from '../prisma/prisma.service';
-import { LoginBaseDto } from './dto/login-base.dto';
-import { RegisterBaseDto } from './dto/register-base.dto';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
+import { Language, Platform, Player, Prisma } from "@prisma/client";
+import * as bcrypt from "bcrypt";
+import { JwtPayload } from "../common/interfaces/jwt-payload.interface";
+import { PrismaService } from "../prisma/prisma.service";
+import { LoginBaseDto } from "./dto/login-base.dto";
+import { RegisterBaseDto } from "./dto/register-base.dto";
 
 const BCRYPT_COST = 12;
 const MAX_ACTIVE_SESSIONS = 10;
@@ -46,7 +46,7 @@ export class AuthService {
     const existingPlayer = await this.prismaService.player.findFirst({
       where: {
         OR: [
-          { username: { equals: registerDto.username, mode: 'insensitive' } },
+          { username: { equals: registerDto.username, mode: "insensitive" } },
           { email: registerDto.email },
         ],
       },
@@ -66,13 +66,13 @@ export class AuthService {
           username: registerDto.username,
           email: registerDto.email,
           passwordHash,
-          language: LANGUAGE_MAP[registerDto.language ?? 'en'] ?? Language.EN,
+          language: LANGUAGE_MAP[registerDto.language ?? "en"] ?? Language.EN,
         },
       });
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
+        error.code === "P2002"
       ) {
         throw this.conflict();
       }
@@ -84,14 +84,10 @@ export class AuthService {
     return { ...tokens, player: this.toPublicPlayer(player) };
   }
 
-  async login(
-    loginDto: LoginBaseDto,
-    platform: Platform,
-    userAgent?: string,
-  ) {
+  async login(loginDto: LoginBaseDto, platform: Platform, userAgent?: string) {
     const player = await this.prismaService.player.findFirst({
       where: {
-        username: { equals: loginDto.username, mode: 'insensitive' },
+        username: { equals: loginDto.username, mode: "insensitive" },
         deletedAt: null,
       },
     });
@@ -104,7 +100,7 @@ export class AuthService {
     );
 
     if (!player || !player.passwordHash || !isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException("Invalid credentials");
     }
 
     const tokens = await this.startSession(player, platform, userAgent);
@@ -128,17 +124,17 @@ export class AuthService {
     });
 
     if (!session || session.playerId !== playerId) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException("Invalid refresh token");
     }
 
     if (session.revokedAt) {
       // Reuse of a rotated token: assume theft and kill the whole family.
       await this.revokeFamily(session.familyId);
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException("Invalid refresh token");
     }
 
     if (session.expiresAt <= new Date()) {
-      throw new UnauthorizedException('Refresh token expired');
+      throw new UnauthorizedException("Refresh token expired");
     }
 
     const player = await this.prismaService.player.findFirst({
@@ -146,7 +142,7 @@ export class AuthService {
     });
 
     if (!player) {
-      throw new UnauthorizedException('Player not found');
+      throw new UnauthorizedException("Player not found");
     }
 
     // Atomic claim: only one concurrent request can revoke this session.
@@ -157,7 +153,7 @@ export class AuthService {
 
     if (claimed.count === 0) {
       await this.revokeFamily(session.familyId);
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException("Invalid refresh token");
     }
 
     return this.issueTokens(player, {
@@ -177,7 +173,7 @@ export class AuthService {
       await this.revokeFamily(session.familyId);
     }
 
-    return { message: 'Logged out successfully' };
+    return { message: "Logged out successfully" };
   }
 
   private async startSession(
@@ -195,21 +191,21 @@ export class AuthService {
   }
 
   private async issueTokens(
-    player: Pick<Player, 'id' | 'username'>,
+    player: Pick<Player, "id" | "username">,
     opts: { platform: Platform; userAgent?: string; familyId: string },
   ): Promise<IssuedTokens> {
     const payload: JwtPayload = { sub: player.id, username: player.username };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_SECRET'),
-        expiresIn: this.configService.get<string>('JWT_EXPIRES_IN', '15m'),
+        secret: this.configService.get<string>("JWT_SECRET"),
+        expiresIn: this.configService.get<string>("JWT_EXPIRES_IN", "15m"),
       }),
       this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+        secret: this.configService.get<string>("JWT_REFRESH_SECRET"),
         expiresIn: this.configService.get<string>(
-          'JWT_REFRESH_EXPIRES_IN',
-          '7d',
+          "JWT_REFRESH_EXPIRES_IN",
+          "7d",
         ),
         // Unique jti guarantees distinct tokens (and hashes) within the same second.
         jwtid: randomUUID(),
@@ -218,7 +214,7 @@ export class AuthService {
 
     const decoded = this.jwtService.decode<JwtPayload | null>(refreshToken);
     if (!decoded?.exp) {
-      throw new Error('Refresh token is missing the exp claim');
+      throw new Error("Refresh token is missing the exp claim");
     }
 
     await this.prismaService.session.create({
@@ -242,7 +238,7 @@ export class AuthService {
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       skip: MAX_ACTIVE_SESSIONS,
       select: { id: true },
     });
@@ -262,7 +258,7 @@ export class AuthService {
   }
 
   private hashToken(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
+    return createHash("sha256").update(token).digest("hex");
   }
 
   private getDummyHash(): Promise<string> {
@@ -273,7 +269,7 @@ export class AuthService {
   }
 
   private conflict(): ConflictException {
-    return new ConflictException('Username or email already in use');
+    return new ConflictException("Username or email already in use");
   }
 
   private toPublicPlayer(player: Player) {

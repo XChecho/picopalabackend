@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 
 export interface MoveFeedback {
   palas: number;
@@ -18,7 +18,7 @@ export class GameService {
       digits.splice(randomIndex, 1);
     }
 
-    return selected.join('');
+    return selected.join("");
   }
 
   calculateFeedback(guess: string, secret: string): MoveFeedback {
@@ -55,16 +55,16 @@ export class GameService {
 
   validateGuess(guess: string): { valid: boolean; error?: string } {
     if (guess.length !== 4) {
-      return { valid: false, error: 'Guess must be 4 digits' };
+      return { valid: false, error: "Guess must be 4 digits" };
     }
 
     if (!/^[1-9]+$/.test(guess)) {
-      return { valid: false, error: 'Digits must be between 1 and 9' };
+      return { valid: false, error: "Digits must be between 1 and 9" };
     }
 
-    const uniqueDigits = new Set(guess.split(''));
+    const uniqueDigits = new Set(guess.split(""));
     if (uniqueDigits.size !== 4) {
-      return { valid: false, error: 'Digits cannot repeat' };
+      return { valid: false, error: "Digits cannot repeat" };
     }
 
     return { valid: true };

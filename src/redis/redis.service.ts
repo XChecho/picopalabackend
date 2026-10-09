@@ -1,6 +1,11 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import Redis from "ioredis";
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -11,9 +16,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private configService: ConfigService) {}
 
   onModuleInit() {
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost');
-    const port = this.configService.get<number>('REDIS_PORT', 6379);
-    const password = this.configService.get<string>('REDIS_PASSWORD') || undefined;
+    const host = this.configService.get<string>("REDIS_HOST", "localhost");
+    const port = this.configService.get<number>("REDIS_PORT", 6379);
+    const password =
+      this.configService.get<string>("REDIS_PASSWORD") || undefined;
 
     try {
       this.client = new Redis({
@@ -23,7 +29,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         maxRetriesPerRequest: 3,
         retryStrategy: (times) => {
           if (times > 3) {
-            this.logger.warn('Redis not available, continuing without cache');
+            this.logger.warn("Redis not available, continuing without cache");
             return null;
           }
           return Math.min(times * 200, 2000);
@@ -31,22 +37,24 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         lazyConnect: true,
       });
 
-      this.client.on('error', (err) => {
+      this.client.on("error", (err) => {
         if (!this.isConnected) {
-          this.logger.warn(`Redis connection failed: ${err.message}. Continuing without cache.`);
+          this.logger.warn(
+            `Redis connection failed: ${err.message}. Continuing without cache.`,
+          );
         }
       });
 
-      this.client.on('connect', () => {
+      this.client.on("connect", () => {
         this.isConnected = true;
-        this.logger.log('Redis connected');
+        this.logger.log("Redis connected");
       });
 
       this.client.connect().catch(() => {
-        this.logger.warn('Redis not available, continuing without cache');
+        this.logger.warn("Redis not available, continuing without cache");
       });
     } catch (error) {
-      this.logger.warn('Redis initialization failed, continuing without cache');
+      this.logger.warn("Redis initialization failed, continuing without cache");
       this.client = null;
     }
   }
@@ -72,7 +80,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     if (!this.client || !this.isConnected) return;
     try {
       if (ttlSeconds) {
-        await this.client.set(key, value, 'EX', ttlSeconds);
+        await this.client.set(key, value, "EX", ttlSeconds);
       } else {
         await this.client.set(key, value);
       }

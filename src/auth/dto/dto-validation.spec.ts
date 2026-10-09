@@ -104,11 +104,14 @@ describe("WebRegisterDto", () => {
     ).toEqual(["email", "language"]);
   });
 
-  it.each(["WEB", "IOS"])("rejects a client-declared platform %s", async (platform) => {
-    expect(
-      (await check(WebRegisterDto, { ...validRegister, platform })).failed,
-    ).toEqual(["platform"]);
-  });
+  it.each(["WEB", "IOS"])(
+    "rejects a client-declared platform %s",
+    async (platform) => {
+      expect(
+        (await check(WebRegisterDto, { ...validRegister, platform })).failed,
+      ).toEqual(["platform"]);
+    },
+  );
 
   it.each([
     ["missing", undefined],
@@ -158,8 +161,12 @@ describe("WebLoginDto", () => {
       (await check(WebLoginDto, { username: "al", password: "short" })).failed,
     ).toEqual(["password", "username"]);
     expect(
-      (await check(WebLoginDto, { username: "alice", password: "a".repeat(73) }))
-        .failed,
+      (
+        await check(WebLoginDto, {
+          username: "alice",
+          password: "a".repeat(73),
+        })
+      ).failed,
     ).toEqual(["password"]);
   });
 });
@@ -201,7 +208,8 @@ describe("Mobile auth DTOs", () => {
     "rejects platform %p",
     async (platform) => {
       expect(
-        (await check(MobileRegisterDto, { ...mobileRegister, platform })).failed,
+        (await check(MobileRegisterDto, { ...mobileRegister, platform }))
+          .failed,
       ).toEqual(["platform"]);
       expect(
         (
@@ -308,11 +316,21 @@ describe("JoinRoomDto", () => {
 
 describe("Public DTOs", () => {
   it("WaitlistDto normalises the email and validates the locale", async () => {
-    const ok = await check(WaitlistDto, { email: " A@B.com ", locale: "es", captchaToken: "t" });
+    const ok = await check(WaitlistDto, {
+      email: " A@B.com ",
+      locale: "es",
+      captchaToken: "t",
+    });
     expect(ok.failed).toEqual([]);
     expect(ok.instance.email).toBe("a@b.com");
     expect(
-      (await check(WaitlistDto, { email: "a@b.com", locale: "fr", captchaToken: "t" })).failed,
+      (
+        await check(WaitlistDto, {
+          email: "a@b.com",
+          locale: "fr",
+          captchaToken: "t",
+        })
+      ).failed,
     ).toEqual(["locale"]);
   });
 

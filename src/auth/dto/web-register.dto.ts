@@ -1,5 +1,5 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
-import { RegisterBaseDto } from './register-base.dto';
+import { IsNotEmpty, IsString, MaxLength } from "class-validator";
+import { RegisterBaseDto } from "./register-base.dto";
 
 export class WebRegisterDto extends RegisterBaseDto {
   @IsString()

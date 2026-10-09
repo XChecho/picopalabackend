@@ -1,5 +1,11 @@
-import { Platform } from '@prisma/client';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Platform } from "@prisma/client";
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
 
 export class UpdatePushTokenDto {
   @IsString()

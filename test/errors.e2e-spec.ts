@@ -83,17 +83,14 @@ describe("Error handling (e2e)", () => {
       expectNoInternals(res.text);
     });
 
-    it(
-      "returns 413 for bodies above the 100kb JSON limit",
-      async () => {
-        const res = await http(app)
-          .post(`${API}/web/auth/login`)
-          .set("X-Forwarded-For", freshIp())
-          .send({ username: "abc", password: "x".repeat(150_000) });
-        expect(res.status).toBe(413);
-        expect(res.body.stack).toBeUndefined();
-      },
-    );
+    it("returns 413 for bodies above the 100kb JSON limit", async () => {
+      const res = await http(app)
+        .post(`${API}/web/auth/login`)
+        .set("X-Forwarded-For", freshIp())
+        .send({ username: "abc", password: "x".repeat(150_000) });
+      expect(res.status).toBe(413);
+      expect(res.body.stack).toBeUndefined();
+    });
 
     it("returns 400 (not 500) for malformed JSON", async () => {
       const res = await http(app)

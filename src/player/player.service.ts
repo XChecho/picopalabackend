@@ -3,11 +3,17 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { GameMode, Language, MatchStatus, Platform, Prisma } from '@prisma/client';
-import { CloudinaryService } from '../cloudinary/cloudinary.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { UpdatePlayerDto } from './dto/update-player.dto';
+} from "@nestjs/common";
+import {
+  GameMode,
+  Language,
+  MatchStatus,
+  Platform,
+  Prisma,
+} from "@prisma/client";
+import { CloudinaryService } from "../cloudinary/cloudinary.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { UpdatePlayerDto } from "./dto/update-player.dto";
 
 const LANGUAGE_MAP: Record<string, Language> = {
   es: Language.ES,
@@ -29,7 +35,12 @@ const PROFILE_SELECT = {
 const MAX_PAGE_SIZE = 100;
 const MAX_ELO_HISTORY = 50;
 
-function clampInt(value: number, min: number, max: number, fallback: number): number {
+function clampInt(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(Math.max(Math.trunc(value), min), max);
 }
@@ -39,7 +50,7 @@ function parseEnum<T extends string>(
   allowed: readonly T[],
   field: string,
 ): T | undefined {
-  if (value === undefined || value === '') return undefined;
+  if (value === undefined || value === "") return undefined;
   const match = allowed.find((a) => a === value);
   if (!match) {
     throw new BadRequestException(`Invalid ${field}`);
@@ -61,7 +72,7 @@ export class PlayerService {
     });
 
     if (!player) {
-      throw new NotFoundException('Player not found');
+      throw new NotFoundException("Player not found");
     }
 
     return player;
@@ -73,20 +84,22 @@ export class PlayerService {
     if (updatePlayerDto.username) {
       const existing = await this.prismaService.player.findFirst({
         where: {
-          username: { equals: updatePlayerDto.username, mode: 'insensitive' },
+          username: { equals: updatePlayerDto.username, mode: "insensitive" },
           NOT: { id: playerId },
         },
         select: { id: true },
       });
 
       if (existing) {
-        throw new ConflictException('Username already taken');
+        throw new ConflictException("Username already taken");
       }
     }
 
     const data: Prisma.PlayerUpdateInput = {};
-    if (updatePlayerDto.username !== undefined) data.username = updatePlayerDto.username;
-    if (updatePlayerDto.avatar !== undefined) data.avatarUrl = updatePlayerDto.avatar;
+    if (updatePlayerDto.username !== undefined)
+      data.username = updatePlayerDto.username;
+    if (updatePlayerDto.avatar !== undefined)
+      data.avatarUrl = updatePlayerDto.avatar;
     if (updatePlayerDto.language !== undefined) {
       data.language = LANGUAGE_MAP[updatePlayerDto.language];
     }
@@ -100,9 +113,9 @@ export class PlayerService {
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
+        error.code === "P2002"
       ) {
-        throw new ConflictException('Username already taken');
+        throw new ConflictException("Username already taken");
       }
       throw error;
     }
@@ -151,7 +164,8 @@ export class PlayerService {
       totalPicos: sum((r) => r.totalPicos),
       totalPalas: sum((r) => r.totalPalas),
       totalDurationSec,
-      avgTimePerGame: totalGames > 0 ? Math.round(totalDurationSec / totalGames) : 0,
+      avgTimePerGame:
+        totalGames > 0 ? Math.round(totalDurationSec / totalGames) : 0,
       byMode,
     };
   }
@@ -170,8 +184,12 @@ export class PlayerService {
       participants: { some: { playerId } },
     };
 
-    const parsedMode = parseEnum(mode, Object.values(GameMode), 'mode');
-    const parsedStatus = parseEnum(status, Object.values(MatchStatus), 'status');
+    const parsedMode = parseEnum(mode, Object.values(GameMode), "mode");
+    const parsedStatus = parseEnum(
+      status,
+      Object.values(MatchStatus),
+      "status",
+    );
     if (parsedMode) where.mode = parsedMode;
     if (parsedStatus) where.status = parsedStatus;
 
@@ -190,7 +208,7 @@ export class PlayerService {
           finishedAt: true,
           createdAt: true,
           participants: {
-            orderBy: { seat: 'asc' },
+            orderBy: { seat: "asc" },
             // secretNumber is intentionally never selected.
             select: {
               seat: true,
@@ -204,7 +222,7 @@ export class PlayerService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         take,
         skip,
       }),
@@ -225,7 +243,7 @@ export class PlayerService {
     });
 
     if (!player) {
-      throw new NotFoundException('Player not found');
+      throw new NotFoundException("Player not found");
     }
 
     if (player.avatarUrl) {
@@ -241,21 +259,25 @@ export class PlayerService {
     });
   }
 
-  async updatePushToken(playerId: string, pushToken: string, platform?: Platform) {
+  async updatePushToken(
+    playerId: string,
+    pushToken: string,
+    platform?: Platform,
+  ) {
     await this.assertActive(playerId);
 
     let resolved = platform;
     if (!resolved) {
       const lastSession = await this.prismaService.session.findFirst({
         where: { playerId, revokedAt: null },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         select: { platform: true },
       });
       resolved = lastSession?.platform;
     }
 
     if (!resolved) {
-      throw new BadRequestException('platform is required');
+      throw new BadRequestException("platform is required");
     }
 
     const now = new Date();
@@ -265,7 +287,7 @@ export class PlayerService {
       create: { playerId, platform: resolved, pushToken, lastUsedAt: now },
     });
 
-    return { message: 'Push token updated' };
+    return { message: "Push token updated" };
   }
 
   async getEloHistory(playerId: string, limit: number = 20) {
@@ -278,7 +300,7 @@ export class PlayerService {
         eloAfter: { not: null },
         match: { finishedAt: { not: null } },
       },
-      orderBy: { match: { finishedAt: 'desc' } },
+      orderBy: { match: { finishedAt: "desc" } },
       take,
       select: {
         eloBefore: true,
@@ -311,7 +333,7 @@ export class PlayerService {
       select: { id: true },
     });
     if (!player) {
-      throw new NotFoundException('Player not found');
+      throw new NotFoundException("Player not found");
     }
   }
 }

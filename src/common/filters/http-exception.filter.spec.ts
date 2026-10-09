@@ -61,10 +61,13 @@ describe("HttpExceptionFilter", () => {
 
   it("maps malformed JSON parser errors to a generic 400", () => {
     const { host, status, json } = makeHost("http");
-    const error = Object.assign(new SyntaxError("Expected double-quoted property name"), {
-      status: 400,
-      expose: true,
-    });
+    const error = Object.assign(
+      new SyntaxError("Expected double-quoted property name"),
+      {
+        status: 400,
+        expose: true,
+      },
+    );
 
     filter.catch(error, host);
 
@@ -74,7 +77,10 @@ describe("HttpExceptionFilter", () => {
 
   it("does not trust a 4xx status on errors that are not exposed", () => {
     const { host, status } = makeHost("http");
-    const error = Object.assign(new Error("internal"), { status: 418, expose: false });
+    const error = Object.assign(new Error("internal"), {
+      status: 418,
+      expose: false,
+    });
 
     filter.catch(error, host);
 
