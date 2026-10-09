@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { PlayerModule } from './player/player.module';
 import { MatchModule } from './match/match.module';
@@ -10,13 +10,18 @@ import { GameModule } from './game/game.module';
 import { NotificationModule } from './notification/notification.module';
 import { StatsModule } from './stats/stats.module';
 import { EloModule } from './elo/elo.module';
+import { PublicModule } from './public/public.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { CaptchaModule } from './captcha/captcha.module';
+import { ClientIpThrottlerGuard } from './common/guards/client-ip-throttler.guard';
+import { validateEnv } from './common/config/env.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
@@ -30,6 +35,7 @@ import { RedisModule } from './redis/redis.module';
         ],
       }),
     }),
+    CaptchaModule,
     AuthModule,
     PlayerModule,
     MatchModule,
@@ -38,13 +44,14 @@ import { RedisModule } from './redis/redis.module';
     NotificationModule,
     StatsModule,
     EloModule,
+    PublicModule,
     PrismaModule,
     RedisModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: ClientIpThrottlerGuard,
     },
   ],
 })

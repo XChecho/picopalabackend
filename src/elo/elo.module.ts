@@ -1,5 +1,5 @@
-import { Module } from '@nestjs/common';
-import { EloService } from './elo.service';
+import { Module } from "@nestjs/common";
+import { EloService } from "./elo.service";
 
 @Module({
   providers: [EloService],

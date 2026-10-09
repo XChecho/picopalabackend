@@ -1,24 +1,19 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
-import { StatsService } from './stats.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { StatsService } from "./stats.service";
+import { SyncStatsDto } from "./dto/sync-stats.dto";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
 
-@Controller('stats')
+@Controller("stats")
 @UseGuards(JwtAuthGuard)
 export class StatsController {
   constructor(private readonly statsService: StatsService) {}
 
-  @Post('sync')
+  @Post("sync")
   async syncOfflineStats(
-    @CurrentUser('id') playerId: string,
-    @Body() stats: {
-      wins: number;
-      losses: number;
-      draws: number;
-      totalPicos: number;
-      totalPalas: number;
-    },
+    @CurrentUser("id") playerId: string,
+    @Body() dto: SyncStatsDto,
   ) {
-    return this.statsService.syncOfflineStats(playerId, stats);
+    return this.statsService.syncOfflineMatches(playerId, dto.matches);
   }
 }

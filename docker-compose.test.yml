@@ -1,0 +1,30 @@
+# Disposable infrastructure for E2E tests (npm run test:e2e). Never used in production.
+name: picopala-e2e
+
+services:
+  postgres-e2e:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: pp_e2e
+    ports:
+      - "127.0.0.1:54340:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pp_e2e"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  redis-e2e:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:63990:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

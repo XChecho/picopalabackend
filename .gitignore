@@ -33,12 +33,13 @@ lerna-debug.log*
 coverage/
 .nyc_output/
 
-# Prisma
-prisma/migrations/
-
 # Redis
 *.rdb
 dump.rdb
 
 # OS
 Thumbs.db
+
+# Local/production env files (never commit; .env.example is the template)
+.env.*
+!.env.example
