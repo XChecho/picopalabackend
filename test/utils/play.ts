@@ -5,6 +5,7 @@ import { Solver } from "./solver";
 export interface IMoveResult {
   guess: string;
   status: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supertest response bodies are untyped
   body: any;
 }
 
@@ -13,6 +14,7 @@ export interface IPlayOutcome {
   moves: IMoveResult[];
   /** Every HTTP body seen while playing (create + moves), for leak scanning. */
   bodies: unknown[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supertest response bodies are untyped
   finalBody: any;
   won: boolean;
 }
@@ -49,6 +51,7 @@ export async function playMatch(
 ): Promise<IPlayOutcome> {
   const solver = new Solver();
   const moves: IMoveResult[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supertest response bodies are untyped
   let finalBody: any = null;
 
   for (let turn = 0; turn < 25; turn++) {
