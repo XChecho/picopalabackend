@@ -17,6 +17,7 @@ interface ITxMock {
     update: jest.Mock;
   };
   match: { create: jest.Mock };
+  move: { createMany: jest.Mock };
 }
 
 const asTx = (tx: ITxMock): Prisma.TransactionClient =>
@@ -29,6 +30,7 @@ const makeTx = (): ITxMock => ({
     update: jest.fn().mockResolvedValue({}),
   },
   match: { create: jest.fn().mockResolvedValue({ id: "match-new" }) },
+  move: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
 });
 
 const CLIENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -229,9 +231,123 @@ describe("StatsService", () => {
       });
       expect(data.startedAt).toEqual(new Date("2025-06-01T09:58:00.000Z"));
       expect(data.participants.create).toEqual([
-        { seat: 1, playerId: "p1", result: "WIN", attemptsUsed: 5 },
-        { seat: 2, isAi: true, result: "LOSS" },
+        {
+          id: expect.any(String),
+          seat: 1,
+          playerId: "p1",
+          result: "WIN",
+          attemptsUsed: 5,
+        },
+        { id: expect.any(String), seat: 2, isAi: true, result: "LOSS" },
       ]);
+    });
+
+    describe("move history", () => {
+      const moves = [
+        {
+          seat: 1 as const,
+          turnNumber: 1,
+          guess: "1234",
+          picos: 1,
+          palas: 1,
+          isWin: false,
+        },
+        {
+          seat: 2 as const,
+          turnNumber: 1,
+          guess: "5678",
+          picos: 0,
+          palas: 2,
+          isWin: false,
+        },
+        {
+          seat: 1 as const,
+          turnNumber: 2,
+          guess: "1243",
+          picos: 4,
+          palas: 0,
+          isWin: true,
+        },
+      ];
+
+      it("persists moves and secrets, linking each move to its participant", async () => {
+        tx.playerStats.findUniqueOrThrow.mockResolvedValue({
+          currentStreak: 1,
+          bestStreak: 1,
+          bestAttempts: 2,
+        });
+
+        await service.syncOfflineMatches("p1", [
+          makeDto({
+            attemptsUsed: 2,
+            totalPicos: 5,
+            totalPalas: 1,
+            moves,
+            playerSecret: "9876",
+            aiSecret: "1243",
+          }),
+        ]);
+
+        const participants =
+          tx.match.create.mock.calls[0][0].data.participants.create;
+        expect(participants[0]).toMatchObject({
+          seat: 1,
+          secretNumber: "9876",
+        });
+        expect(participants[1]).toMatchObject({
+          seat: 2,
+          secretNumber: "1243",
+        });
+        const rows = tx.move.createMany.mock.calls[0][0].data;
+        expect(rows).toHaveLength(3);
+        expect(rows[0]).toMatchObject({
+          matchId: "match-new",
+          participantId: participants[0].id,
+        });
+        expect(rows[1].participantId).toBe(participants[1].id);
+        expect(rows[0].createdAt.getTime()).toBeLessThan(
+          rows[1].createdAt.getTime(),
+        );
+      });
+
+      it("does not write moves when none are sent", async () => {
+        tx.playerStats.findUniqueOrThrow.mockResolvedValue({
+          currentStreak: 1,
+          bestStreak: 1,
+          bestAttempts: 5,
+        });
+        await service.syncOfflineMatches("p1", [makeDto()]);
+        expect(tx.move.createMany).not.toHaveBeenCalled();
+      });
+
+      it("rejects a player move count different from attemptsUsed", async () => {
+        await expect(
+          service.syncOfflineMatches("p1", [
+            makeDto({ attemptsUsed: 5, moves }),
+          ]),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it("rejects repeated guesses for the same seat", async () => {
+        const dup = [
+          moves[0],
+          { ...moves[2], guess: "1234", picos: 1, palas: 1, isWin: false },
+        ];
+        await expect(
+          service.syncOfflineMatches("p1", [
+            makeDto({ attemptsUsed: 2, moves: dup }),
+          ]),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it("rejects isWin inconsistent with picos", async () => {
+        const bad = [{ ...moves[0], isWin: true }];
+        await expect(
+          service.syncOfflineMatches("p1", [
+            makeDto({ attemptsUsed: 1, moves: bad }),
+          ]),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
     });
 
     it("uses MAX_TURNS as end reason for draws and mirrors the AI result", async () => {

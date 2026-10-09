@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
@@ -131,6 +132,9 @@ export class StatsService {
     const finishedAt = dto.finishedAt ? new Date(dto.finishedAt) : new Date();
     const startedAt = new Date(finishedAt.getTime() - dto.durationSec * 1000);
 
+    const playerParticipantId = randomUUID();
+    const aiParticipantId = randomUUID();
+
     try {
       return await this.prismaService.$transaction(async (tx) => {
         const created = await tx.match.create({
@@ -148,21 +152,42 @@ export class StatsService {
             participants: {
               create: [
                 {
+                  id: playerParticipantId,
                   seat: 1,
                   playerId,
                   result: dto.result,
                   attemptsUsed: dto.attemptsUsed,
+                  ...(dto.playerSecret && { secretNumber: dto.playerSecret }),
                 },
                 {
+                  id: aiParticipantId,
                   seat: 2,
                   isAi: true,
                   result: this.opposite(dto.result),
+                  ...(dto.aiSecret && { secretNumber: dto.aiSecret }),
                 },
               ],
             },
           },
           select: { id: true },
         });
+
+        if (dto.moves?.length) {
+          await tx.move.createMany({
+            data: dto.moves.map((move, index) => ({
+              matchId: created.id,
+              participantId:
+                move.seat === 1 ? playerParticipantId : aiParticipantId,
+              turnNumber: move.turnNumber,
+              guess: move.guess,
+              picos: move.picos,
+              palas: move.palas,
+              isWin: move.isWin,
+              // Array order is chronological; 1ms steps keep replay (createdAt asc) in that order.
+              createdAt: new Date(startedAt.getTime() + index),
+            })),
+          });
+        }
 
         await this.recordResult(tx, {
           playerId,
@@ -231,11 +256,44 @@ export class StatsService {
     if (dto.result === MatchResult.WIN && dto.totalPicos < 4) {
       throw new BadRequestException("A win requires at least 4 picos");
     }
+    if (dto.moves?.length) this.assertMovesPlausible(dto, maxTurns);
     if (
       dto.finishedAt &&
       new Date(dto.finishedAt).getTime() > Date.now() + CLOCK_SKEW_MS
     ) {
       throw new BadRequestException("finishedAt cannot be in the future");
+    }
+  }
+
+  private assertMovesPlausible(dto: OfflineMatchDto, maxTurns: number): void {
+    const moves = dto.moves ?? [];
+    const turns = new Set<string>();
+    const guesses = new Set<string>();
+    const perSeat = { 1: 0, 2: 0 };
+
+    for (const move of moves) {
+      const turnKey = `${move.seat}:${move.turnNumber}`;
+      const guessKey = `${move.seat}:${move.guess}`;
+      if (turns.has(turnKey) || guesses.has(guessKey)) {
+        throw new BadRequestException("Duplicate move in match");
+      }
+      turns.add(turnKey);
+      guesses.add(guessKey);
+      perSeat[move.seat]++;
+
+      if (move.turnNumber > maxTurns) {
+        throw new BadRequestException("turnNumber exceeds maxTurns");
+      }
+      if (move.picos + move.palas > 4) {
+        throw new BadRequestException("picos + palas out of range");
+      }
+      if (move.isWin !== (move.picos === 4)) {
+        throw new BadRequestException("isWin inconsistent with picos");
+      }
+    }
+
+    if (perSeat[1] !== dto.attemptsUsed) {
+      throw new BadRequestException("moves do not match attemptsUsed");
     }
   }
 
