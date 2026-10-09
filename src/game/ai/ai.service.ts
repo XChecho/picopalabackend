@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { GameService } from '../game.service';
+import { Injectable } from "@nestjs/common";
+import { GameService } from "../game.service";
 
 @Injectable()
 export class AiService {
@@ -15,13 +15,17 @@ export class AiService {
     return guess;
   }
 
-  mediumMove(moves: Array<{ guess: string; palas: number; picos: number }>): string {
+  mediumMove(
+    moves: Array<{ guess: string; palas: number; picos: number }>,
+  ): string {
     const possibilities = this.getAllPossibilities();
     const filtered = this.filterByFeedback(possibilities, moves);
     return filtered[Math.floor(Math.random() * filtered.length)];
   }
 
-  hardMove(moves: Array<{ guess: string; palas: number; picos: number }>): string {
+  hardMove(
+    moves: Array<{ guess: string; palas: number; picos: number }>,
+  ): string {
     const possibilities = this.getAllPossibilities();
     const filtered = this.filterByFeedback(possibilities, moves);
 

@@ -1,11 +1,11 @@
-import { createHash } from 'crypto';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Language, MatchStatus, Prisma, Rank } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ContactDto } from './dto/contact.dto';
-import { WaitlistDto, WaitlistLocale } from './dto/waitlist.dto';
-import { TtlCache } from './ttl-cache';
+import { createHash } from "crypto";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Language, MatchStatus, Prisma, Rank } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { ContactDto } from "./dto/contact.dto";
+import { WaitlistDto, WaitlistLocale } from "./dto/waitlist.dto";
+import { TtlCache } from "./ttl-cache";
 
 export interface IPublicStats {
   totalPlayers: number;
@@ -40,7 +40,7 @@ export interface IPublicPlayerProfile {
 
 const CACHE_TTL_MS = 60_000;
 // Used only when CONTACT_IP_SALT is not configured.
-const DEFAULT_IP_SALT = 'picopala-contact-default-salt';
+const DEFAULT_IP_SALT = "picopala-contact-default-salt";
 
 const LOCALE_MAP: Record<WaitlistLocale, Language> = {
   es: Language.ES,
@@ -52,14 +52,19 @@ const LOCALE_MAP: Record<WaitlistLocale, Language> = {
 export class PublicService {
   private readonly logger = new Logger(PublicService.name);
   private readonly statsCache = new TtlCache<IPublicStats>(CACHE_TTL_MS, 1);
-  private readonly leaderboardCache = new TtlCache<ILeaderboardEntry[]>(CACHE_TTL_MS, 500);
+  private readonly leaderboardCache = new TtlCache<ILeaderboardEntry[]>(
+    CACHE_TTL_MS,
+    500,
+  );
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
 
-  async joinWaitlist(dto: Omit<WaitlistDto, 'captchaToken'>): Promise<{ subscribed: true }> {
+  async joinWaitlist(
+    dto: Omit<WaitlistDto, "captchaToken">,
+  ): Promise<{ subscribed: true }> {
     // Existing rows (including unsubscribed ones) are left untouched; the
     // response is identical either way to avoid email enumeration.
     await this.prisma.waitlistSubscriber.upsert({
@@ -76,11 +81,11 @@ export class PublicService {
   }
 
   async createContactMessage(
-    dto: Omit<ContactDto, 'captchaToken'>,
+    dto: Omit<ContactDto, "captchaToken">,
     ip: string,
   ): Promise<{ received: true }> {
-    const salt = this.config.get<string>('CONTACT_IP_SALT') || DEFAULT_IP_SALT;
-    const ipHash = createHash('sha256').update(`${ip}${salt}`).digest('hex');
+    const salt = this.config.get<string>("CONTACT_IP_SALT") || DEFAULT_IP_SALT;
+    const ipHash = createHash("sha256").update(`${ip}${salt}`).digest("hex");
     await this.prisma.contactMessage.create({
       data: {
         name: dto.name,
@@ -95,7 +100,7 @@ export class PublicService {
   }
 
   getStats(): Promise<IPublicStats> {
-    return this.statsCache.getOrLoad('stats', async () => {
+    return this.statsCache.getOrLoad("stats", async () => {
       const startOfDay = new Date();
       startOfDay.setUTCHours(0, 0, 0, 0);
       const finished: Prisma.MatchWhereInput = { status: MatchStatus.FINISHED };
@@ -112,12 +117,13 @@ export class PublicService {
   }
 
   getAppLinks(): IAppLinks {
-    const read = (key: string): string | null => this.config.get<string>(key) || null;
+    const read = (key: string): string | null =>
+      this.config.get<string>(key) || null;
     return {
-      ios: read('APP_STORE_URL'),
-      android: read('PLAY_STORE_URL'),
-      version: read('APP_VERSION'),
-      minVersion: read('APP_MIN_VERSION'),
+      ios: read("APP_STORE_URL"),
+      android: read("PLAY_STORE_URL"),
+      version: read("APP_VERSION"),
+      minVersion: read("APP_MIN_VERSION"),
     };
   }
 
@@ -125,7 +131,7 @@ export class PublicService {
     return this.leaderboardCache.getOrLoad(`${limit}:${offset}`, async () => {
       const players = await this.prisma.player.findMany({
         where: { deletedAt: null, stats: { some: { games: { gt: 0 } } } },
-        orderBy: [{ elo: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [{ elo: "desc" }, { createdAt: "asc" }],
         skip: offset,
         take: limit,
         select: {
@@ -149,19 +155,24 @@ export class PublicService {
 
   async getPlayerProfile(username: string): Promise<IPublicPlayerProfile> {
     const player = await this.prisma.player.findFirst({
-      where: { username: { equals: username, mode: 'insensitive' }, deletedAt: null },
+      where: {
+        username: { equals: username, mode: "insensitive" },
+        deletedAt: null,
+      },
       select: {
         username: true,
         avatarUrl: true,
         elo: true,
         rank: true,
         createdAt: true,
-        stats: { select: { games: true, wins: true, losses: true, draws: true } },
+        stats: {
+          select: { games: true, wins: true, losses: true, draws: true },
+        },
       },
     });
     if (!player) {
-      this.logger.debug('Public profile not found');
-      throw new NotFoundException('Player not found');
+      this.logger.debug("Public profile not found");
+      throw new NotFoundException("Player not found");
     }
 
     const stats = player.stats.reduce(

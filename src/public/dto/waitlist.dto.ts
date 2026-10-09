@@ -1,12 +1,19 @@
-import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from "class-transformer";
+import {
+  IsEmail,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
 
-export const WAITLIST_LOCALES = ['es', 'en', 'pt'] as const;
+export const WAITLIST_LOCALES = ["es", "en", "pt"] as const;
 export type WaitlistLocale = (typeof WAITLIST_LOCALES)[number];
 
 export class WaitlistDto {
   @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toLowerCase() : value,
+    typeof value === "string" ? value.trim().toLowerCase() : value,
   )
   @IsEmail()
   @MaxLength(254)

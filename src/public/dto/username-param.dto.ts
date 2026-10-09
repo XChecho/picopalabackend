@@ -1,4 +1,4 @@
-import { IsString, Matches, MaxLength } from 'class-validator';
+import { IsString, Matches, MaxLength } from "class-validator";
 
 export class UsernameParamDto {
   @IsString()

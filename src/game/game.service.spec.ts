@@ -47,15 +47,12 @@ describe("GameService", () => {
 
     // KNOWN BUG (see report): a repeated digit in the guess inflates palas.
     // Unreachable through the API because validateGuess rejects repeats.
-    it(
-      "does not inflate palas when the guess repeats a digit (guess 1123 vs secret 4156)",
-      () => {
-        expect(service.calculateFeedback("1123", "4156")).toMatchObject({
-          picos: 1,
-          palas: 0,
-        });
-      },
-    );
+    it("does not inflate palas when the guess repeats a digit (guess 1123 vs secret 4156)", () => {
+      expect(service.calculateFeedback("1123", "4156")).toMatchObject({
+        picos: 1,
+        palas: 0,
+      });
+    });
 
     it("is symmetric in total matches for unique-digit inputs", () => {
       const a = service.calculateFeedback("1357", "7531");

@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class NotificationService {
@@ -12,10 +12,10 @@ export class NotificationService {
     data?: Record<string, unknown>,
   ) {
     try {
-      const response = await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
+      const response = await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           to: expoPushToken,
@@ -28,7 +28,7 @@ export class NotificationService {
       const result = await response.json();
       return result;
     } catch (error) {
-      console.error('Failed to send push notification:', error);
+      console.error("Failed to send push notification:", error);
       return null;
     }
   }
@@ -40,9 +40,9 @@ export class NotificationService {
   ) {
     return this.sendPushNotification(
       expoPushToken,
-      'Opponent moved!',
+      "Opponent moved!",
       `${opponentUsername} has made their move. It's your turn!`,
-      { matchId, type: 'OPPONENT_MOVE' },
+      { matchId, type: "OPPONENT_MOVE" },
     );
   }
 
@@ -53,9 +53,9 @@ export class NotificationService {
   ) {
     return this.sendPushNotification(
       expoPushToken,
-      'Match found!',
+      "Match found!",
       `Your match with ${opponentUsername} is ready.`,
-      { matchId, type: 'MATCH_FOUND' },
+      { matchId, type: "MATCH_FOUND" },
     );
   }
 
@@ -67,9 +67,9 @@ export class NotificationService {
   ) {
     return this.sendPushNotification(
       expoPushToken,
-      'Room invitation',
+      "Room invitation",
       `${hostUsername} invited you to play! Code: ${code}`,
-      { roomId, code, type: 'ROOM_INVITE' },
+      { roomId, code, type: "ROOM_INVITE" },
     );
   }
 }

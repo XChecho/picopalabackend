@@ -404,13 +404,32 @@ describe("Match versus AI (e2e)", () => {
       expect(joined.status).toBe(201);
       const matchId: string = joined.body.data.match.id;
       expect(joined.body.data.match.player1Id).toBe(host.id);
+      expect(joined.body.data.match.status).toBe("WAITING");
+
+      // No moves until both players have picked a secret.
+      const tooEarly = await submitMove(app, host, matchId, "1234");
+      expect(tooEarly.status).toBe(400);
+      expect(tooEarly.body.message).toBe("Match is not ready to play");
+
+      for (const user of [host, guest]) {
+        const res = await http(app)
+          .post(`${API}/match/${matchId}/secret`)
+          .set(bearer(user.accessToken))
+          .send({ random: true });
+        expect(res.status).toBe(201);
+      }
       assertNoSecretLeak(joined.body, await secretOf(matchId, 1));
       assertNoSecretLeak(joined.body, await secretOf(matchId, 2));
+
+      const started = await http(app)
+        .get(`${API}/match/${matchId}`)
+        .set(bearer(host.accessToken));
+      expect(started.body.data.status).toBe("PLAYING");
 
       const seatOf = (u: ITestUser) => (u.id === host.id ? 1 : 2);
       const players = { 1: host, 2: guest };
       const solvers = { 1: new Solver(), 2: new Solver() };
-      let seat = joined.body.data.match.currentSeat as 1 | 2;
+      let seat = started.body.data.currentSeat as 1 | 2;
 
       // Out-of-turn move is rejected.
       const other = players[seat === 1 ? 2 : 1];

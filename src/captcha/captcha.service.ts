@@ -3,16 +3,16 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 
 const SITEVERIFY_URL =
-  'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const TIMEOUT_MS = 3000;
 
 interface ITurnstileResponse {
   success?: unknown;
-  'error-codes'?: unknown;
+  "error-codes"?: unknown;
 }
 
 @Injectable()
@@ -24,19 +24,19 @@ export class CaptchaService {
 
   /** Resolves when the token is valid; throws 403 if rejected, 503 if it cannot be verified. */
   async verify(token: string | undefined, remoteIp?: string): Promise<void> {
-    const secret = this.configService.get<string>('TURNSTILE_SECRET_KEY');
+    const secret = this.configService.get<string>("TURNSTILE_SECRET_KEY");
 
     if (!secret) {
-      if (this.configService.get<string>('NODE_ENV') !== 'production') {
+      if (this.configService.get<string>("NODE_ENV") !== "production") {
         if (!this.devWarned) {
           this.devWarned = true;
           this.logger.warn(
-            'TURNSTILE_SECRET_KEY is not set: captcha verification is DISABLED (development mode)',
+            "TURNSTILE_SECRET_KEY is not set: captcha verification is DISABLED (development mode)",
           );
         }
         return;
       }
-      this.logger.error('TURNSTILE_SECRET_KEY is missing in production');
+      this.logger.error("TURNSTILE_SECRET_KEY is missing in production");
       throw this.unavailable();
     }
 
@@ -46,7 +46,7 @@ export class CaptchaService {
 
     const body = new URLSearchParams({ secret, response: token });
     if (remoteIp) {
-      body.set('remoteip', remoteIp);
+      body.set("remoteip", remoteIp);
     }
 
     const controller = new AbortController();
@@ -54,8 +54,8 @@ export class CaptchaService {
     let result: ITurnstileResponse;
     try {
       const res = await fetch(SITEVERIFY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),
         signal: controller.signal,
       });
@@ -76,26 +76,26 @@ export class CaptchaService {
     }
 
     if (
-      typeof result !== 'object' ||
+      typeof result !== "object" ||
       result === null ||
-      typeof result.success !== 'boolean'
+      typeof result.success !== "boolean"
     ) {
-      this.logger.error('Turnstile siteverify returned an invalid payload');
+      this.logger.error("Turnstile siteverify returned an invalid payload");
       throw this.unavailable();
     }
     if (!result.success) {
       this.logger.warn(
-        `Turnstile rejected token: ${JSON.stringify(result['error-codes'] ?? [])}`,
+        `Turnstile rejected token: ${JSON.stringify(result["error-codes"] ?? [])}`,
       );
       throw this.failed();
     }
   }
 
   private failed(): ForbiddenException {
-    return new ForbiddenException('Captcha verification failed');
+    return new ForbiddenException("Captcha verification failed");
   }
 
   private unavailable(): ServiceUnavailableException {
-    return new ServiceUnavailableException('Captcha unavailable');
+    return new ServiceUnavailableException("Captcha unavailable");
   }
 }

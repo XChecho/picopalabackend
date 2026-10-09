@@ -1,5 +1,5 @@
-import { Global, Module } from '@nestjs/common';
-import { CaptchaService } from './captcha.service';
+import { Global, Module } from "@nestjs/common";
+import { CaptchaService } from "./captcha.service";
 
 @Global()
 @Module({

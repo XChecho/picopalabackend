@@ -312,7 +312,10 @@ describe("Public endpoints (e2e)", () => {
       ["unknown locale", { email: "a@example.com", locale: "fr" }],
       ["source too long", { email: "a@example.com", source: "x".repeat(65) }],
       ["extra field", { email: "a@example.com", admin: true }],
-      ["missing captchaToken", { email: "a@example.com", captchaToken: undefined }],
+      [
+        "missing captchaToken",
+        { email: "a@example.com", captchaToken: undefined },
+      ],
       [
         "captchaToken too long",
         { email: "a@example.com", captchaToken: "t".repeat(2049) },
@@ -327,7 +330,6 @@ describe("Public endpoints (e2e)", () => {
   });
 
   describe("POST /public/contact", () => {
-
     it("stores a cleaned message with a salted IP hash instead of the IP", async () => {
       const ip = "198.51.100.30";
       const res = await http(app)
@@ -387,10 +389,16 @@ describe("Public endpoints (e2e)", () => {
       const res = await http(app)
         .post(`${API}/public/contact`)
         .set("X-Forwarded-For", freshIp())
-        .send({ ...payload, email: "captcha-bad@example.com", captchaToken: "bad-token" });
+        .send({
+          ...payload,
+          email: "captcha-bad@example.com",
+          captchaToken: "bad-token",
+        });
       expect(res.status).toBe(403);
       expect(
-        await db.contactMessage.count({ where: { email: "captcha-bad@example.com" } }),
+        await db.contactMessage.count({
+          where: { email: "captcha-bad@example.com" },
+        }),
       ).toBe(0);
     });
 
