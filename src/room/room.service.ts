@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   Logger,
@@ -73,7 +74,11 @@ export class RoomService {
     this.matchFoundListeners.push(listener);
   }
 
-  async createPrivateRoom(hostId: string, maxTurns?: number) {
+  async createPrivateRoom(
+    hostId: string,
+    maxTurns?: number,
+    rematchOfMatchId?: string,
+  ) {
     const expiresAt = new Date(Date.now() + ROOM_TTL_MS);
 
     for (let attempt = 0; attempt < ROOM_CODE_ATTEMPTS; attempt++) {
@@ -83,6 +88,7 @@ export class RoomService {
             code: this.generateRoomCode(),
             hostId,
             maxTurns,
+            rematchOfMatchId,
             status: RoomStatus.WAITING,
             expiresAt,
           },
@@ -98,7 +104,10 @@ export class RoomService {
         });
         return { ...room, type: "PRIVATE" as const };
       } catch (error) {
-        if (!this.isUniqueViolation(error)) throw error;
+        // Only a clash on the room code is retried; any other unique column is the caller's conflict.
+        if (!this.isUniqueViolation(error) || this.violatesRematchSlot(error)) {
+          throw error;
+        }
       }
     }
 
@@ -115,6 +124,7 @@ export class RoomService {
         status: true,
         maxTurns: true,
         expiresAt: true,
+        rematchOfMatchId: true,
       },
     });
 
@@ -143,6 +153,20 @@ export class RoomService {
 
     if (room.hostId === guestId) {
       throw new BadRequestException("Cannot join your own room");
+    }
+
+    // A rematch room is reserved for the other player of the original duel.
+    if (room.rematchOfMatchId) {
+      const wasParticipant =
+        await this.prismaService.matchParticipant.findFirst({
+          where: { matchId: room.rematchOfMatchId, playerId: guestId },
+          select: { id: true },
+        });
+      if (!wasParticipant) {
+        throw new ForbiddenException(
+          "This rematch is reserved for the previous rival",
+        );
+      }
     }
 
     const match = await this.prismaService.$transaction(async (tx) => {
@@ -543,6 +567,15 @@ export class RoomService {
       code += ROOM_CODE_CHARS.charAt(randomInt(0, ROOM_CODE_CHARS.length));
     }
     return code;
+  }
+
+  private violatesRematchSlot(error: unknown): boolean {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    const target: unknown = error.meta?.target;
+    return (
+      (Array.isArray(target) && target.includes("rematchOfMatchId")) ||
+      (typeof target === "string" && target.includes("rematchOfMatchId"))
+    );
   }
 
   private isUniqueViolation(error: unknown): boolean {

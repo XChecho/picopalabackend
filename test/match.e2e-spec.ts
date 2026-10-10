@@ -136,7 +136,7 @@ describe("Match versus AI (e2e)", () => {
       }
     });
 
-    it("never exposes the rival secret (outside the winning guess) in any response", async () => {
+    it("never exposes the rival secret while playing, and reveals it once the match is over", async () => {
       outcome.bodies.forEach((b) =>
         assertNoSecretLeak(b, aiSecret, RIVAL_KEYS),
       );
@@ -145,7 +145,7 @@ describe("Match versus AI (e2e)", () => {
         .get(`${API}/match/${outcome.matchId}`)
         .set(bearer(user.accessToken));
       expect(view.status).toBe(200);
-      assertNoSecretLeak(view.body, aiSecret, RIVAL_KEYS);
+      expect(view.body.data.player2Number).toBe(aiSecret);
       expect(view.body.data.status).toBe("FINISHED");
       expect(view.body.data.winnerId).toBe(user.id);
       expect(view.body.data.player1Number).toBe(
@@ -459,7 +459,9 @@ describe("Match versus AI (e2e)", () => {
       expect(view.body.data.status).toBe("FINISHED");
       expect(view.body.data.mode).toBe("PRIVATE");
       expect(view.body.data.winnerId).not.toBeNull();
-      expect(view.body.data.player2Number).toBeUndefined();
+      // Finished: both secrets are revealed to the participants.
+      expect(view.body.data.player1Number).toBe(await secretOf(matchId, 1));
+      expect(view.body.data.player2Number).toBe(await secretOf(matchId, 2));
       expect(seatOf(host)).toBe(1);
 
       // Private matches are unranked: no elo movement.
@@ -473,6 +475,50 @@ describe("Match versus AI (e2e)", () => {
       expect(stats).toHaveLength(2);
       expect(stats.reduce((s, r) => s + r.wins, 0)).toBe(1);
       expect(stats.reduce((s, r) => s + r.losses, 0)).toBe(1);
+
+      // Rematch: only participants, one offer per match, reserved for the previous rival.
+      const stranger = await registerUser(app);
+      const denied = await http(app)
+        .post(`${API}/match/${matchId}/rematch`)
+        .set(bearer(stranger.accessToken));
+      expect(denied.status).toBe(403);
+
+      const offer = await http(app)
+        .post(`${API}/match/${matchId}/rematch`)
+        .set(bearer(host.accessToken));
+      expect(offer.status).toBe(201);
+      const rematchCode: string = offer.body.data.code;
+
+      const again = await http(app)
+        .post(`${API}/match/${matchId}/rematch`)
+        .set(bearer(host.accessToken));
+      expect(again.body.data.code).toBe(rematchCode);
+
+      const rivalOffer = await http(app)
+        .post(`${API}/match/${matchId}/rematch`)
+        .set(bearer(guest.accessToken));
+      expect(rivalOffer.status).toBe(409);
+
+      const rivalView = await http(app)
+        .get(`${API}/match/${matchId}`)
+        .set(bearer(guest.accessToken));
+      expect(rivalView.body.data.rematch).toEqual({
+        code: rematchCode,
+        requestedBy: host.id,
+      });
+
+      const hijack = await http(app)
+        .post(`${API}/room/private/join`)
+        .set(bearer(stranger.accessToken))
+        .send({ code: rematchCode });
+      expect(hijack.status).toBe(403);
+
+      const accepted = await http(app)
+        .post(`${API}/room/private/join`)
+        .set(bearer(guest.accessToken))
+        .send({ code: rematchCode });
+      expect(accepted.status).toBe(201);
+      expect(accepted.body.data.match.player1Id).toBe(host.id);
     });
   });
 
