@@ -191,6 +191,8 @@ model Room {
   hostId    String     @db.Uuid
   status    RoomStatus @default(WAITING)
   maxTurns  Int        @default(12) @db.SmallInt
+  /// Set when the room is a rematch offer for that finished match (at most one per match).
+  rematchOfMatchId String? @unique @db.Uuid
   expiresAt DateTime
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt

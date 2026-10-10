@@ -64,6 +64,14 @@ export class MatchController {
     );
   }
 
+  @Post(":id/rematch")
+  async rematch(
+    @CurrentUser("id") playerId: string,
+    @Param("id", ParseUUIDPipe) matchId: string,
+  ) {
+    return this.matchService.requestRematch(playerId, matchId);
+  }
+
   @Post(":id/move")
   async submitMove(
     @CurrentUser("id") playerId: string,
