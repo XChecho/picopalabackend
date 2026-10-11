@@ -11,12 +11,14 @@ import {
   MatchResult,
   MatchStatus,
   Prisma,
+  RoomStatus,
 } from "@prisma/client";
 import { EloService } from "../elo/elo.service";
 import { AiService } from "../game/ai/ai.service";
 import { GameService } from "../game/game.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { StatsService } from "../stats/stats.service";
+import { RoomService } from "../room/room.service";
 import { MatchEvent, MatchService } from "./match.service";
 
 const HUMAN_SECRET = "1234";
@@ -115,12 +117,14 @@ describe("MatchService", () => {
       count: jest.Mock;
     };
     move: { findMany: jest.Mock };
+    room: { findUnique: jest.Mock; updateMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let tx: ITxMock;
   let ai: { easyMove: jest.Mock; mediumMove: jest.Mock; hardMove: jest.Mock };
   let stats: { recordResult: jest.Mock };
   let game: GameService;
+  let rooms: { createPrivateRoom: jest.Mock };
 
   beforeEach(() => {
     tx = {
@@ -156,6 +160,10 @@ describe("MatchService", () => {
         count: jest.fn().mockResolvedValue(0),
       },
       move: { findMany: jest.fn().mockResolvedValue([]) },
+      room: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $transaction: jest.fn((fn: (t: Prisma.TransactionClient) => unknown) =>
         fn(tx as unknown as Prisma.TransactionClient),
       ),
@@ -166,6 +174,9 @@ describe("MatchService", () => {
       hardMove: jest.fn().mockReturnValue("9876"),
     };
     stats = { recordResult: jest.fn().mockResolvedValue(undefined) };
+    rooms = {
+      createPrivateRoom: jest.fn().mockResolvedValue({ code: "REM123" }),
+    };
     game = new GameService();
 
     service = new MatchService(
@@ -174,6 +185,7 @@ describe("MatchService", () => {
       ai as unknown as AiService,
       new EloService(),
       stats as unknown as StatsService,
+      rooms as unknown as RoomService,
     );
 
     // Default transaction behaviour: echo moves back with a stable id.
@@ -721,6 +733,181 @@ describe("MatchService", () => {
       expect(view.player2Number).toBe(AI_SECRET);
       expect(view.player1Number).toBeUndefined();
       expectNoSecret(view, HUMAN_SECRET);
+    });
+  });
+
+  describe("finished private duel", () => {
+    const finishedRow = (overrides: Record<string, unknown> = {}) => ({
+      id: "m1",
+      mode: GameMode.PRIVATE,
+      status: MatchStatus.FINISHED,
+      endReason: EndReason.GUESSED,
+      maxTurns: 12,
+      roomId: "room-1",
+      participants: [
+        {
+          id: "part-1",
+          seat: 1,
+          playerId: "p1",
+          isAi: false,
+          result: MatchResult.WIN,
+          attemptsUsed: 3,
+        },
+        {
+          id: "part-2",
+          seat: 2,
+          playerId: "p2",
+          isAi: false,
+          result: MatchResult.LOSS,
+          attemptsUsed: 3,
+        },
+      ],
+      ...overrides,
+    });
+
+    it("reveals the rival secret to a participant once the match is over", async () => {
+      prisma.match.findUnique.mockResolvedValue(finishedRow());
+      prisma.matchParticipant.findMany.mockResolvedValue([
+        { id: "part-1", secretNumber: HUMAN_SECRET },
+        { id: "part-2", secretNumber: AI_SECRET },
+      ]);
+
+      const view = await service.getMatch("p1", "m1");
+
+      expect(view.player1Number).toBe(HUMAN_SECRET);
+      expect(view.player2Number).toBe(AI_SECRET);
+    });
+
+    it("exposes an open rematch offer in the view", async () => {
+      prisma.match.findUnique.mockResolvedValue(finishedRow());
+      prisma.matchParticipant.findMany.mockResolvedValue([]);
+      prisma.room.findUnique.mockResolvedValue({
+        code: "REM123",
+        hostId: "p2",
+        status: RoomStatus.WAITING,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      const view = await service.getMatch("p1", "m1");
+
+      expect(view.rematch).toEqual({ code: "REM123", requestedBy: "p2" });
+    });
+
+    describe("requestRematch", () => {
+      it("opens a linked private room for the requester", async () => {
+        prisma.match.findUnique.mockResolvedValue(finishedRow());
+
+        await expect(service.requestRematch("p1", "m1")).resolves.toEqual({
+          code: "REM123",
+        });
+        expect(rooms.createPrivateRoom).toHaveBeenCalledWith("p1", 12, "m1");
+      });
+
+      it("rejects non-participants", async () => {
+        prisma.match.findUnique.mockResolvedValue(finishedRow());
+        await expect(service.requestRematch("p9", "m1")).rejects.toThrow(
+          ForbiddenException,
+        );
+      });
+
+      it("rejects an unfinished match", async () => {
+        prisma.match.findUnique.mockResolvedValue(
+          finishedRow({ status: MatchStatus.PLAYING }),
+        );
+        await expect(service.requestRematch("p1", "m1")).rejects.toThrow(
+          ConflictException,
+        );
+      });
+
+      it("rejects non-private modes", async () => {
+        prisma.match.findUnique.mockResolvedValue(
+          finishedRow({ mode: GameMode.VERSUS_AI, roomId: null }),
+        );
+        await expect(service.requestRematch("p1", "m1")).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+
+      it("is idempotent for the requester and conflicts for the rival", async () => {
+        prisma.match.findUnique.mockResolvedValue(finishedRow());
+        prisma.room.findUnique.mockResolvedValue({
+          id: "r2",
+          code: "REM123",
+          hostId: "p1",
+          status: RoomStatus.WAITING,
+          expiresAt: new Date(Date.now() + 60_000),
+        });
+
+        await expect(service.requestRematch("p1", "m1")).resolves.toEqual({
+          code: "REM123",
+        });
+        await expect(service.requestRematch("p2", "m1")).rejects.toThrow(
+          ConflictException,
+        );
+        expect(rooms.createPrivateRoom).not.toHaveBeenCalled();
+      });
+
+      it("detaches an expired offer instead of deleting it", async () => {
+        prisma.match.findUnique.mockResolvedValue(finishedRow());
+        prisma.room.findUnique.mockResolvedValue({
+          id: "r2",
+          code: "OLD123",
+          hostId: "p2",
+          status: RoomStatus.EXPIRED,
+          expiresAt: new Date(Date.now() - 60_000),
+          match: null,
+        });
+
+        await service.requestRematch("p1", "m1");
+
+        expect(prisma.room.updateMany).toHaveBeenCalledWith({
+          where: { id: "r2", rematchOfMatchId: "m1" },
+          data: { rematchOfMatchId: null },
+        });
+        expect(rooms.createPrivateRoom).toHaveBeenCalled();
+      });
+
+      it("refuses a second rematch once the first one was played", async () => {
+        prisma.match.findUnique.mockResolvedValue(finishedRow());
+        prisma.room.findUnique.mockResolvedValue({
+          id: "r2",
+          code: "OLD123",
+          hostId: "p2",
+          status: RoomStatus.CLOSED,
+          expiresAt: new Date(Date.now() + 60_000),
+          match: { id: "m2" },
+        });
+
+        await expect(service.requestRematch("p1", "m1")).rejects.toThrow(
+          ConflictException,
+        );
+        expect(prisma.room.updateMany).not.toHaveBeenCalled();
+        expect(rooms.createPrivateRoom).not.toHaveBeenCalled();
+      });
+
+      it("recovers when a concurrent request takes the slot first", async () => {
+        prisma.match.findUnique.mockResolvedValue(finishedRow());
+        prisma.room.findUnique
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            id: "r3",
+            code: "RIV123",
+            hostId: "p2",
+            status: RoomStatus.WAITING,
+            expiresAt: new Date(Date.now() + 60_000),
+            match: null,
+          });
+        rooms.createPrivateRoom.mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError("dup", {
+            code: "P2002",
+            clientVersion: "test",
+          }),
+        );
+
+        await expect(service.requestRematch("p1", "m1")).rejects.toThrow(
+          ConflictException,
+        );
+      });
     });
   });
 

@@ -13,12 +13,14 @@ import {
   MatchResult,
   MatchStatus,
   Prisma,
+  RoomStatus,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { GameService } from "../game/game.service";
 import { AiService } from "../game/ai/ai.service";
 import { EloService, IEloOutcome } from "../elo/elo.service";
 import { StatsService } from "../stats/stats.service";
+import { RoomService } from "../room/room.service";
 import { CreateMatchDto } from "./dto/create-match.dto";
 import { SetSecretDto } from "./dto/set-secret.dto";
 import {
@@ -140,6 +142,7 @@ export class MatchService {
     private readonly aiService: AiService,
     private readonly eloService: EloService,
     private readonly statsService: StatsService,
+    private readonly roomService: RoomService,
   ) {}
 
   onMatchEvent(listener: MatchEventListener): void {
@@ -201,17 +204,91 @@ export class MatchService {
       "Not authorized to view this match",
     );
 
-    const moves = await this.prismaService.move.findMany({
-      where: { matchId },
-      orderBy: [{ createdAt: "asc" }, { turnNumber: "asc" }],
-      select: MOVE_SELECT,
-    });
-
-    const view = await this.buildView(summary, playerId);
+    // Independent reads: run them together, each DB round trip is expensive.
+    const [moves, view] = await Promise.all([
+      this.prismaService.move.findMany({
+        where: { matchId },
+        orderBy: [{ createdAt: "asc" }, { turnNumber: "asc" }],
+        select: MOVE_SELECT,
+      }),
+      this.buildView(summary, playerId),
+    ]);
     return {
       ...view,
       moves: moves.map((m) => this.toMoveView(m, summary.participants)),
     };
+  }
+
+  /**
+   * Offers a rematch of a finished private duel: opens a fresh private room hosted by the
+   * requester and linked to this match. The rival sees it as `rematch` in their match view
+   * and accepts by joining the room with the code.
+   */
+  async requestRematch(playerId: string, matchId: string) {
+    const summary = await this.loadSummaryRow(matchId);
+    this.assertParticipant(
+      summary,
+      playerId,
+      "Not authorized to request a rematch for this match",
+    );
+
+    if (summary.mode !== GameMode.PRIVATE || summary.roomId === null) {
+      throw new BadRequestException("Only private duels support a rematch");
+    }
+    if (summary.status !== MatchStatus.FINISHED) {
+      throw new ConflictException("The match is not finished yet");
+    }
+
+    // Two attempts: a concurrent request may take the unique slot between our read and create.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const existing = await this.prismaService.room.findUnique({
+        where: { rematchOfMatchId: matchId },
+        select: {
+          id: true,
+          code: true,
+          hostId: true,
+          status: true,
+          expiresAt: true,
+          match: { select: { id: true } },
+        },
+      });
+
+      if (existing) {
+        const open =
+          existing.status === RoomStatus.IN_GAME ||
+          (existing.status === RoomStatus.WAITING &&
+            existing.expiresAt > new Date());
+        if (open) {
+          if (existing.hostId === playerId) return { code: existing.code };
+          throw new ConflictException("Your rival already offered a rematch");
+        }
+        if (existing.match) {
+          throw new ConflictException("The rematch was already played");
+        }
+        // Abandoned offer that never became a match: detach it to free the slot.
+        // Never delete the room: it may be linked to other records.
+        await this.prismaService.room.updateMany({
+          where: { id: existing.id, rematchOfMatchId: matchId },
+          data: { rematchOfMatchId: null },
+        });
+      }
+
+      try {
+        const room = await this.roomService.createPrivateRoom(
+          playerId,
+          summary.maxTurns,
+          matchId,
+        );
+        return { code: room.code };
+      } catch (error) {
+        const raced =
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === PRISMA_UNIQUE_VIOLATION;
+        if (!raced) throw error;
+      }
+    }
+
+    throw new ConflictException("A rematch is already being set up");
   }
 
   async isParticipant(playerId: string, matchId: string): Promise<boolean> {
@@ -1146,15 +1223,28 @@ export class MatchService {
    */
   private async buildView(summary: MatchSummaryRow, viewerId: string) {
     const me = summary.participants.find((p) => p.playerId === viewerId);
+    // Once the match is over both secrets are public to its participants.
+    const revealBoth =
+      me !== undefined && summary.status === MatchStatus.FINISHED;
     let mySecret: string | null = null;
+    let rivalSecret: string | null = null;
 
-    if (me) {
+    if (revealBoth) {
+      const rows = await this.prismaService.matchParticipant.findMany({
+        where: { matchId: summary.id },
+        select: { id: true, secretNumber: true },
+      });
+      mySecret = rows.find((row) => row.id === me.id)?.secretNumber ?? null;
+      rivalSecret = rows.find((row) => row.id !== me.id)?.secretNumber ?? null;
+    } else if (me) {
       const own = await this.prismaService.matchParticipant.findUnique({
         where: { id: me.id },
         select: { secretNumber: true },
       });
       mySecret = own?.secretNumber ?? null;
     }
+
+    const rematch = await this.findRematchOffer(summary);
 
     const seat1 = summary.participants.find((p) => p.seat === 1);
     const seat2 = summary.participants.find((p) => p.seat === 2);
@@ -1172,8 +1262,9 @@ export class MatchService {
       mySeat: me?.seat ?? null,
       player1Id: seat1?.playerId ?? null,
       player2Id: seat2?.playerId ?? null,
-      player1Number: me?.seat === 1 ? mySecret : undefined,
-      player2Number: me?.seat === 2 ? mySecret : undefined,
+      player1Number: this.secretForSeat(1, me?.seat, mySecret, rivalSecret),
+      player2Number: this.secretForSeat(2, me?.seat, mySecret, rivalSecret),
+      rematch,
       currentTurn: turnCount + 1,
       turnCount,
       winnerId: winner?.playerId ?? null,
@@ -1185,6 +1276,37 @@ export class MatchService {
         attemptsUsed: p.attemptsUsed,
       })),
     };
+  }
+
+  /** The viewer's own secret, or the rival's once the match is over; undefined while it must stay hidden. */
+  private secretForSeat(
+    seat: number,
+    mySeat: number | undefined,
+    mySecret: string | null,
+    rivalSecret: string | null,
+  ): string | null | undefined {
+    if (mySeat === undefined) return undefined;
+    if (mySeat === seat) return mySecret;
+    return rivalSecret ?? undefined;
+  }
+
+  /** Pending (or just accepted) rematch offer of a finished private duel. */
+  private async findRematchOffer(summary: MatchSummaryRow) {
+    if (
+      summary.mode !== GameMode.PRIVATE ||
+      summary.status !== MatchStatus.FINISHED
+    ) {
+      return null;
+    }
+    const room = await this.prismaService.room.findUnique({
+      where: { rematchOfMatchId: summary.id },
+      select: { code: true, hostId: true, status: true, expiresAt: true },
+    });
+    if (!room) return null;
+    const open =
+      room.status === RoomStatus.IN_GAME ||
+      (room.status === RoomStatus.WAITING && room.expiresAt > new Date());
+    return open ? { code: room.code, requestedBy: room.hostId } : null;
   }
 
   private toMoveView(move: MoveRow, participants: IParticipantRef[]) {
